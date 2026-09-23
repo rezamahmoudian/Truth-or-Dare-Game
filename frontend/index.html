@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+  <head>
+    <meta charset="UTF-8" />
+    <!-- viewport-fit=cover is what makes env(safe-area-inset-*) report real
+         values; without it the bottom composer sits under the home indicator. -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#1a0a2d" />
+    <meta name="color-scheme" content="dark" />
+    <meta
+      name="description"
+      content="با یک غریبه بازی کن، دوست پیدا کن و گفتگو را ادامه بده."
+    />
+
+    <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32.png" />
+    <link rel="icon" type="image/png" sizes="64x64" href="/icons/favicon-64.png" />
+
+    <!-- iOS ignores the web manifest for most of this and reads these instead. -->
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="جرأت" />
+
+    <!-- The font is fetched before the CSS asks for it, so the first paint is
+         already in Vazirmatn rather than flashing through Tahoma. -->
+    <link
+      rel="preload"
+      href="/fonts/Vazirmatn[wght].woff2"
+      as="font"
+      type="font/woff2"
+      crossorigin
+    />
+
+    <title>جرأت — جرئت یا حقیقت</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

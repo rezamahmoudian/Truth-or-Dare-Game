@@ -1,0 +1,116 @@
+name: ft
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-ft}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ft}
+      POSTGRES_DB: ${POSTGRES_DB:-ft}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ft} -d ${POSTGRES_DB:-ft}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    volumes:
+      - redisdata:/data
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  backend:
+    build: ./backend
+    command: >
+      sh -c "python manage.py migrate --noinput &&
+             uvicorn config.asgi:application --host 0.0.0.0 --port 8000 --reload"
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-ft}:${POSTGRES_PASSWORD:-ft}@db:5432/${POSTGRES_DB:-ft}
+      REDIS_URL: redis://redis:6379/0
+    volumes:
+      - ./backend:/app
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker:
+    build: ./backend
+    command: celery -A config worker --loglevel=info
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-ft}:${POSTGRES_PASSWORD:-ft}@db:5432/${POSTGRES_DB:-ft}
+      REDIS_URL: redis://redis:6379/0
+    volumes:
+      - ./backend:/app
+    depends_on:
+      - backend
+
+  # Separate from the worker because turn timers are scheduled, not queued —
+  # and running beat inside a worker means duplicate schedules the moment you
+  # scale workers past one.
+  beat:
+    build: ./backend
+    command: celery -A config beat --loglevel=info
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-ft}:${POSTGRES_PASSWORD:-ft}@db:5432/${POSTGRES_DB:-ft}
+      REDIS_URL: redis://redis:6379/0
+    volumes:
+      - ./backend:/app
+    depends_on:
+      - backend
+
+  frontend:
+    build: ./frontend
+    environment:
+      BACKEND_ORIGIN: http://backend:8000
+      # Bind-mounted files on Windows and macOS do not emit reliable inotify
+      # events, so the dev server polls instead of missing your edits.
+      VITE_POLLING: "1"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    ports:
+      - "5173:5173"
+    depends_on:
+      - backend
+
+  # Production only: TLS, /.well-known/assetlinks.json for the TWA build, and a
+  # single origin in front of the app and the API.
+  #   docker compose --profile prod up
+  caddy:
+    image: caddy:2-alpine
+    profiles: ["prod"]
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./caddy/site:/srv/site:ro
+      - caddydata:/data
+      - caddyconfig:/config
+    depends_on:
+      - backend
+
+volumes:
+  pgdata:
+  redisdata:
+  caddydata:
+  caddyconfig:

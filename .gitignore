@@ -1,0 +1,42 @@
+# Environment
+.env
+.env.local
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+backend/staticfiles/
+backend/media/
+backend/celerybeat-schedule*
+*.sqlite3
+
+# Node
+node_modules/
+frontend/dist/
+frontend/dev-dist/
+frontend/tsconfig.tsbuildinfo
+npm-debug.log*
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Caddy
+caddy/data/
+caddy/config/
+
+# Production secrets and signing — never commit these.
+.env.production
+twa/android.keystore
+twa/*.keystore
+twa/*.apk
+twa/*.aab
+twa/app/
+twa/build/
+twa/.gradle/

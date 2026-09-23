@@ -1,0 +1,235 @@
+@import "tailwindcss";
+
+/* Vazirmatn is self-hosted rather than loaded from Google Fonts: Google's font
+   CDN is unreliable for Iranian users, and a missing font on a Persian UI is
+   not a cosmetic problem — it is the difference between a product and a
+   prototype. One variable file covers every weight the app uses. */
+@font-face {
+  font-family: "Vazirmatn";
+  src: url("/fonts/Vazirmatn[wght].woff2") format("woff2-variations");
+  font-weight: 100 900;
+  font-display: swap;
+}
+
+@theme {
+  --font-sans: "Vazirmatn", Tahoma, system-ui, sans-serif;
+
+  /* Sampled from the supplied design. The base is a deep violet rather than a
+     neutral black: it is what makes the warm hero card and the coloured mode
+     tiles read as lit objects instead of stickers on a dark page. */
+  --color-ink: #1a0a2d;
+  --color-ink-deep: #150823;
+  --color-surface: #23124a;
+  --color-surface-2: #2a1651;
+  --color-surface-3: #361958;
+  --color-line: #40255f;
+  --color-line-soft: #2f1a55;
+
+  --color-text: #f6f1ff;
+  --color-muted: #d7c6f3;
+  --color-faint: #8f7cb4;
+
+  /* The brand mark, the active tab and every primary action. */
+  --color-brand: #ff4d6d;
+  --color-brand-soft: #ff7089;
+  --color-brand-deep: #d92a52;
+
+  /* The hero runs warm, orange into red-pink. */
+  --color-hot: #f5762a;
+  --color-hot-deep: #ee4b56;
+
+  /* Per-mode accents, used for the icon tile and its status dot. */
+  --color-mode-group: #8b5cf6;
+  --color-mode-girls: #e93281;
+  --color-mode-boys: #32a9e3;
+  --color-mode-friends: #3cd98a;
+
+  --color-ok: #2eff8e;
+  --color-ok-deep: #17a673;
+  --color-bad: #ff5f7a;
+  --color-warn: #ffcc0c;
+
+  /* One radius scale, so nothing is rounded "about right". */
+  --radius-field: 1rem;
+  --radius-card: 1.35rem;
+  --radius-hero: 1.75rem;
+  --radius-sheet: 1.75rem;
+
+}
+
+html,
+body,
+#root {
+  /* dvh, never vh: the mobile address bar collapses on scroll and a vh layout
+     visibly jumps — worst of all inside a chat screen. */
+  height: 100dvh;
+  overflow: hidden;
+}
+
+body {
+  margin: 0;
+  color: var(--color-text);
+  font-family: var(--font-sans);
+
+  /* Two very wide, very dim radials. They are invisible as gradients and do
+     the job of an ambient light: the screen stops looking like flat paint. */
+  background:
+    radial-gradient(70rem 40rem at 85% -8%, #3a1553 0%, transparent 58%),
+    radial-gradient(60rem 38rem at -10% 105%, #2a1050 0%, transparent 60%),
+    var(--color-ink);
+  background-attachment: fixed;
+
+  /* Stops the whole page rubber-banding when a scroll container hits its end. */
+  overscroll-behavior: none;
+  -webkit-tap-highlight-color: transparent;
+  text-rendering: optimizeLegibility;
+}
+
+/* Persian needs more room between lines than Latin at the same size; at 1.5
+   the descenders and the dots below ب/پ/ج collide with the line beneath. */
+body,
+p,
+li,
+button,
+input,
+textarea {
+  line-height: 1.75;
+}
+
+/* Persian digits, and proportional figures inside running text. */
+body {
+  font-feature-settings: "ss02";
+}
+
+/* A scrollbar that does not draw a bright rail down the side of a dark app. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-line) transparent;
+}
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--color-line);
+  border-radius: 999px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* ---- motion ------------------------------------------------------------ */
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes sheet-in {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: none;
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes pulse-soft {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+.animate-rise {
+  animation: rise 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.animate-sheet-in {
+  animation: sheet-in 0.26s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.animate-fade-in {
+  animation: fade-in 0.18s ease-out;
+}
+.animate-pulse-soft {
+  animation: pulse-soft 1.6s ease-in-out infinite;
+}
+
+/* Someone who has asked their phone to stop animating means it. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+/* ---- shared surfaces --------------------------------------------------- */
+
+/* Depth on a dark theme comes from a lighter top edge, not from a shadow —
+   shadows are nearly invisible against near-black and only muddy it. */
+.surface-card {
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 4%), transparent 45%),
+    var(--color-surface-2);
+  border: 1px solid var(--color-line-soft);
+}
+
+.surface-raised {
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 6%), transparent 40%),
+    var(--color-surface-2);
+  border: 1px solid var(--color-line);
+}
+
+/* Bars that sit over scrolling content: translucent, so the content shows
+   through as it passes underneath instead of vanishing at a hard edge. */
+.bar-blur {
+  background: color-mix(in srgb, var(--color-surface) 82%, transparent);
+  backdrop-filter: blur(16px) saturate(140%);
+  -webkit-backdrop-filter: blur(16px) saturate(140%);
+}
+
+.press {
+  transition:
+    transform 0.12s ease,
+    filter 0.12s ease;
+}
+.press:active:not(:disabled) {
+  transform: scale(0.975);
+  filter: brightness(0.92);
+}
+
+/* The hero on the lobby: warm, and the only saturated surface on the screen. */
+.hero-warm {
+  background: linear-gradient(140deg, var(--color-hot) 0%, var(--color-hot-deep) 78%);
+  box-shadow:
+    0 22px 48px -24px var(--color-hot-deep),
+    inset 0 1px 0 rgb(255 255 255 / 30%);
+}
+
+/* Tinted tile behind a mode icon. The hue comes from --tint, set per card, so
+   the tile, the icon and the status dot never drift apart. */
+.tile-tint {
+  background: color-mix(in srgb, var(--tint) 22%, transparent);
+  color: var(--tint);
+}

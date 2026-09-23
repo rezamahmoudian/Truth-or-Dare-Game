@@ -1,0 +1,75 @@
+# Production reverse proxy.
+#
+# One origin for the app, the API and the WebSocket. That is not just tidiness:
+# a PWA's service worker is scoped to its origin, and the TWA build will only
+# accept the APK as a verified owner of this exact domain.
+#
+# DOMAIN comes from .env.production. With a real domain Caddy fetches and
+# renews the TLS certificate itself; with "localhost" it serves plain HTTP,
+# which is how the production stack is tested on a laptop.
+
+{$DOMAIN:localhost} {
+	encode zstd gzip
+
+	# --- security headers -------------------------------------------------
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		# The app never embeds in a frame; nothing should embed it either.
+		X-Frame-Options "DENY"
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		-Server
+	}
+
+	# --- Digital Asset Links ---------------------------------------------
+	# The file that lets the TWA/APK open without a browser address bar. It
+	# must be served from exactly this path, over HTTPS, as JSON.
+	handle /.well-known/assetlinks.json {
+		root * /srv/site
+		header Content-Type "application/json"
+		file_server
+	}
+
+	# --- backend ------------------------------------------------------------
+	handle /api/* {
+		reverse_proxy backend:8000
+	}
+
+	# Channels upgrades this connection; Caddy passes it through unchanged.
+	handle /ws/* {
+		reverse_proxy backend:8000
+	}
+
+	handle /admin/* {
+		reverse_proxy backend:8000
+	}
+
+	# Django's collected static files (the admin's CSS and JS).
+	handle_path /static/* {
+		root * /srv/static
+		header Cache-Control "public, max-age=604800"
+		file_server
+	}
+
+	# --- the app --------------------------------------------------------------
+	handle {
+		root * /srv/app
+
+		# The service worker and the shell must never be cached by the browser.
+		# A cached sw.js means an installed app never learns a new version
+		# exists — people would be stuck on the old build indefinitely.
+		@nocache path /sw.js /index.html /manifest.webmanifest /registerSW.js
+		header @nocache Cache-Control "no-cache"
+
+		# Vite puts a content hash in every asset name, so these can be cached
+		# forever: a new build is a new filename.
+		@hashed path /assets/*
+		header @hashed Cache-Control "public, max-age=31536000, immutable"
+
+		# Unknown paths fall back to the shell so client-side routes survive a
+		# refresh.
+		try_files {path} /index.html
+		file_server
+	}
+}

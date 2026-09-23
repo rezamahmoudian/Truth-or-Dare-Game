@@ -1,0 +1,84 @@
+# Production overrides.
+#
+#   docker compose --env-file .env.production \
+#     -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+#
+# --env-file matters: it is what the ${POSTGRES_*} placeholders in the base file
+# are filled from. Without it the database would start with the dev defaults.
+#
+# Differences from development, and why each one matters:
+#   * the backend runs without --reload and with several workers
+#   * the frontend is built once into a volume instead of running a dev server
+#   * Caddy is the only thing listening on the host — Postgres and Redis are
+#     not published, because a database reachable from the internet is the
+#     most common way a small product loses its users' data
+#   * static files and the SPA are served by Caddy, not by Django
+
+services:
+  db:
+    ports: !reset []
+    restart: unless-stopped
+
+  redis:
+    ports: !reset []
+    restart: unless-stopped
+
+  backend:
+    # One line per step, all at the same indentation. A folded (>) block keeps
+    # *more-indented* lines as real newlines, so an earlier version that
+    # indented the uvicorn flags ran bare `uvicorn app` — bound to 127.0.0.1,
+    # unreachable from Caddy — and then tried to execute `--host` on its own.
+    command: >
+      sh -c "python manage.py migrate --noinput &&
+      python manage.py collectstatic --noinput &&
+      uvicorn config.asgi:application --host 0.0.0.0 --port 8000 --workers ${UVICORN_WORKERS:-2} --proxy-headers --forwarded-allow-ips='*'"
+    env_file: !override [.env.production]
+    ports: !reset []
+    # !override, not !reset: !reset discards the list that follows it, so an
+    # earlier version mounted nothing and collectstatic wrote into the
+    # container's own disk, where Caddy could never see it.
+    volumes: !override
+      - staticfiles:/app/staticfiles
+    restart: unless-stopped
+
+  worker:
+    env_file: !override [.env.production]
+    volumes: !reset []
+    restart: unless-stopped
+
+  beat:
+    env_file: !override [.env.production]
+    volumes: !reset []
+    restart: unless-stopped
+
+  # Replaces the dev server: builds the bundle, copies it into a volume, exits.
+  frontend:
+    command: sh -c "npm run build && rm -rf /out/* && cp -r dist/. /out/"
+    environment: !reset {}
+    ports: !reset []
+    volumes: !override
+      - frontend_dist:/out
+    restart: "no"
+
+  caddy:
+    profiles: !reset []
+    env_file: .env.production
+    # Replaced rather than merged: the base file mounts ./caddy/site read-only
+    # at /srv itself, and Docker cannot create /srv/app and /srv/static inside a
+    # read-only mount.
+    volumes: !override
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./caddy/site:/srv/site:ro
+      - frontend_dist:/srv/app:ro
+      - staticfiles:/srv/static:ro
+      - caddydata:/data
+      - caddyconfig:/config
+    depends_on:
+      backend:
+        condition: service_started
+      frontend:
+        condition: service_completed_successfully
+
+volumes:
+  frontend_dist:
+  staticfiles:
