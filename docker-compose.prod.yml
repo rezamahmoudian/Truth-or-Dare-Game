@@ -31,7 +31,7 @@ services:
     command: >
       sh -c "python manage.py migrate --noinput &&
       python manage.py collectstatic --noinput &&
-      uvicorn config.asgi:application --host 0.0.0.0 --port 8000 --workers ${UVICORN_WORKERS:-2} --proxy-headers --forwarded-allow-ips='*'"
+      uvicorn config.asgi:application --host 0.0.0.0 --port 8000 --workers ${UVICORN_WORKERS:-4} --proxy-headers --forwarded-allow-ips='*'"
     env_file: !override [.env.production]
     ports: !reset []
     # !override, not !reset: !reset discards the list that follows it, so an

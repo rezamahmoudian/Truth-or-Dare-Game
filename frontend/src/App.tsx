@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
 
 import { ChatListScreen } from "@/features/chat/ChatListScreen";
 import { ChatRoomScreen } from "@/features/chat/ChatRoomScreen";
@@ -14,6 +14,7 @@ import { useMatch } from "@/store/match";
 import { useSocial } from "@/store/social";
 import { useSession } from "@/store/session";
 import { Button } from "@/ui/Button";
+import { ErrorBoundary } from "@/ui/ErrorBoundary";
 
 export default function App() {
   const status = useSession((s) => s.status);
@@ -61,6 +62,20 @@ export default function App() {
     <BrowserRouter>
       <OfflineBar />
       <UpdateToast />
+      <RoutedScreens />
+    </BrowserRouter>
+  );
+}
+
+/**
+ * Inside the router so the boundary can key off the path: a crash on one screen
+ * stays on that screen, and walking away from it clears the error instead of
+ * leaving the app wedged.
+ */
+function RoutedScreens() {
+  const location = useLocation();
+  return (
+    <ErrorBoundary resetKey={location.pathname}>
       <Routes>
         <Route path="/" element={<PlayScreen />} />
         <Route path="/chats" element={<ChatListScreen />} />
@@ -69,7 +84,7 @@ export default function App() {
         <Route path="/profile" element={<ProfileScreen />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
-    </BrowserRouter>
+    </ErrorBoundary>
   );
 }
 

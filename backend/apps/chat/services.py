@@ -16,6 +16,7 @@ from django.db.models import (
     F,
     IntegerField,
     OuterRef,
+    Prefetch,
     Q,
     QuerySet,
     Subquery,
@@ -52,11 +53,18 @@ PREVIEW_LABELS = {
 # ---------------------------------------------------------------------------
 
 
-def conversations_for(user: User) -> QuerySet[Conversation]:
-    """The user's chat list, with unread counts, in one query.
+def conversations_for(
+    user: User, *, with_participants: bool = False
+) -> QuerySet[Conversation]:
+    """The user's chat list, with unread counts, in a fixed number of queries.
 
     The nested subquery is the price of not doing a count per row; this list is
     fetched on nearly every app launch, so an N+1 here is felt immediately.
+
+    `with_participants` prefetches the members as `active_members`. Callers that
+    render names and avatars must use it — asking for them per row turned this
+    into 41 queries for 20 conversations, and the cost grows with exactly the
+    people who use the product most.
     """
     my_participation = Participant.objects.filter(
         conversation=OuterRef("pk"), user=user, left_at__isnull=True
@@ -106,9 +114,21 @@ def conversations_for(user: User) -> QuerySet[Conversation]:
         .values("total")
     )
 
-    return conversations.annotate(
+    queryset = conversations.annotate(
         unread_count=Coalesce(Subquery(unread, output_field=IntegerField()), 0)
     ).distinct()
+
+    if with_participants:
+        queryset = queryset.prefetch_related(
+            Prefetch(
+                "participants",
+                queryset=Participant.objects.filter(
+                    left_at__isnull=True
+                ).select_related("user"),
+                to_attr="active_members",
+            )
+        )
+    return queryset
 
 
 def active_participant(user: User, conversation_id) -> Participant:
@@ -443,6 +463,10 @@ def post_message(
     )
     conversation.last_message_at = message.created_at
     conversation.last_message_preview = _preview_for(message)
+
+    # A message created a millisecond ago cannot have reactions yet. Saying so
+    # here spares `message_payload` a SELECT on the busiest path in the app.
+    message._prefetched_objects_cache = {"reactions": Reaction.objects.none()}
 
     recipients = participant_user_ids(conversation.id)
     payload = message_payload(message)

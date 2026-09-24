@@ -26,7 +26,8 @@ def user_payload(user: User | None) -> dict | None:
 
 def message_payload(message: Message) -> dict:
     reactions: defaultdict[str, list[int]] = defaultdict(list)
-    # Only touches the DB when reactions were prefetched or already loaded.
+    # This is a query unless the caller prefetched `reactions` — history does,
+    # and `post_message` primes an empty cache for the message it just wrote.
     for reaction in message.reactions.all():
         reactions[reaction.emoji].append(reaction.user_id)
 

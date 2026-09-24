@@ -30,16 +30,17 @@ class ConversationListView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request) -> Response:
-        conversations = list(services.conversations_for(request.user))
+        conversations = services.conversations_for(request.user, with_participants=True)
         return Response(
             [
                 conversation_payload(
                     conversation,
                     unread_count=conversation.unread_count,
+                    # From the prefetch, not a query per row.
                     participants=[
-                        user
-                        for user in services.participants_of(conversation.id)
-                        if user.pk != request.user.pk
+                        member.user
+                        for member in conversation.active_members
+                        if member.user_id != request.user.pk
                     ],
                 )
                 for conversation in conversations
