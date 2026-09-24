@@ -159,6 +159,43 @@ body {
   }
 }
 
+/* The prompt arriving reads as a card being turned over, not as text
+   appearing. A small rotateX is enough — a full 180° flip is a toy. */
+@keyframes card-in {
+  from {
+    opacity: 0;
+    transform: perspective(700px) rotateX(-18deg) translateY(10px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: perspective(700px) rotateX(0) translateY(0) scale(1);
+  }
+}
+
+/* Between turn states. Shorter than card-in: this one fires on every
+   choose/answer/confirm, and anything slower would feel like lag. */
+@keyframes swap-in {
+  from {
+    opacity: 0;
+    transform: translateY(7px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* One sweep across the top edge when the turn becomes yours. It runs once and
+   stops — a permanently animating panel is a panel people stop seeing. */
+@keyframes turn-sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(100%);
+  }
+}
+
 .animate-rise {
   animation: rise 0.22s cubic-bezier(0.22, 1, 0.36, 1);
 }
@@ -170,6 +207,34 @@ body {
 }
 .animate-pulse-soft {
   animation: pulse-soft 1.6s ease-in-out infinite;
+}
+.animate-card-in {
+  animation: card-in 0.34s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.animate-swap-in {
+  animation: swap-in 0.2s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* The panel when the turn belongs to the person looking at it. */
+.turn-mine {
+  position: relative;
+  overflow: hidden;
+}
+.turn-mine::before {
+  content: "";
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline-start: 0;
+  block-size: 2px;
+  inline-size: 100%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--color-brand),
+    var(--color-hot),
+    transparent
+  );
+  animation: turn-sweep 1.1s cubic-bezier(0.22, 1, 0.36, 1) 1 both;
 }
 
 /* Someone who has asked their phone to stop animating means it. */

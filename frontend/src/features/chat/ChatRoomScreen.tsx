@@ -146,8 +146,9 @@ export function ChatRoomScreen() {
               selfId={me?.id ?? 0}
               participants={conversation?.participants ?? []}
               // A private chat has two equals, so either may start a game;
-              // a room belongs to whoever opened it.
-              isOwner={conversation?.type === "DIRECT" || isOwner}
+              // a room belongs to whoever opened it. Until it loads, neither
+              // answer is known — and the panel says so rather than guessing.
+              isOwner={conversation ? conversation.type === "DIRECT" || isOwner : null}
             />
             <Composer conversationId={id} />
           </>
@@ -419,7 +420,8 @@ function MessageRow({
   if (message.type === "GAME_PROMPT") {
     const isDare = message.meta?.choice === "DARE";
     return (
-      <div className="animate-rise my-3">
+      // The one card in the app that is literally a card being turned over.
+      <div className="animate-card-in my-3">
         <div
           className={`relative overflow-hidden rounded-card border p-4 text-center ${
             isDare

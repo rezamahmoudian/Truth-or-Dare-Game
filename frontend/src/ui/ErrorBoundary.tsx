@@ -1,3 +1,7 @@
+/* eslint-disable react-refresh/only-export-components --
+   An error boundary has to be a class: React offers no hook for
+   componentDidCatch. Class components are not fast-refreshable, so this
+   rule can never be satisfied here. */
 import { Component, type ErrorInfo, type ReactNode } from "react";
 
 import { Button } from "@/ui/Button";

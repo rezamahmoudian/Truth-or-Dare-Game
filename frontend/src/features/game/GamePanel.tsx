@@ -2,9 +2,10 @@ import { useEffect, useState } from "react";
 
 import { ApiError } from "@/lib/auth";
 import { faNum } from "@/lib/dates";
-import type { GameState, PublicUser } from "@/lib/types";
+import type { GameState, Prompt, PublicUser } from "@/lib/types";
 import { EMPTY_GAME, useGame } from "@/store/game";
 import { Button } from "@/ui/Button";
+import { Skeleton } from "@/ui/Screen";
 
 /**
  * Sits above the composer rather than on a screen of its own.
@@ -23,7 +24,8 @@ export function GamePanel({
   conversationId: string;
   selfId: number;
   participants: PublicUser[];
-  isOwner: boolean;
+  /** `null` while the conversation is still loading and nobody knows yet. */
+  isOwner: boolean | null;
 }) {
   const state: GameState =
     useGame((s) => s.byConversation[conversationId]) ?? EMPTY_GAME;
@@ -54,7 +56,14 @@ export function GamePanel({
     participants.find((p) => p.id === turn.player_id)?.display_name ?? "بازیکن";
 
   return (
-    <div className="animate-rise border-t border-line-soft bg-gradient-to-b from-surface-2 to-surface px-3 py-3">
+    <div
+      className={`animate-rise border-t border-line-soft bg-gradient-to-b from-surface-2 to-surface px-3 py-3 ${
+        isMine ? "turn-mine" : ""
+      }`}
+      // Keyed on the turn so the sweep replays when the turn becomes yours
+      // again, instead of firing once for the life of the panel.
+      key={`turn-${turn.id}`}
+    >
       <div className="mx-auto flex max-w-md flex-col gap-2.5">
         <div className="flex items-center justify-between text-[11px] text-faint">
           <span className="flex items-center gap-1.5">
@@ -80,30 +89,72 @@ export function GamePanel({
           )}
         </div>
 
-        {turn.status === "CHOOSING" &&
-          (isMine ? (
-            <ChooseRow turnId={turn.id} />
-          ) : (
-            <Waiting text={`${playerName} در حال انتخاب است…`} turnId={turn.id} isOwner={isOwner} />
-          ))}
+        {/* A reminder, not a second card. The real card is in the stream, and
+            two identical cards stacked on top of each other look like a bug —
+            but the stream scrolls, and it scrolls most while the answer is
+            being typed, so the question has to stay reachable somehow. */}
+        {turn.prompt && <PromptReminder prompt={turn.prompt} />}
 
-        {turn.status === "ANSWERING" &&
-          (isMine ? (
-            <AnswerRow turnId={turn.id} />
-          ) : (
-            <Waiting text={`منتظر پاسخ ${playerName}…`} turnId={turn.id} isOwner={isOwner} />
-          ))}
+        {/* Keyed on the status so the animation replays at each transition
+            rather than only when the panel first appears. */}
+        <div key={turn.status} className="animate-swap-in">
+          {turn.status === "CHOOSING" &&
+            (isMine ? (
+              <ChooseRow turnId={turn.id} />
+            ) : (
+              <Waiting
+                text={`${playerName} در حال انتخاب است…`}
+                turnId={turn.id}
+                isOwner={isOwner === true}
+              />
+            ))}
 
-        {turn.status === "CONFIRMING" && (
-          <ConfirmRow
-            turnId={turn.id}
-            isMine={isMine}
-            isOwner={isOwner}
-            playerName={playerName}
-            alreadyConfirmed={turn.confirmations.includes(selfId)}
-          />
-        )}
+          {turn.status === "ANSWERING" &&
+            (isMine ? (
+              <AnswerRow turnId={turn.id} />
+            ) : (
+              <Waiting text={`منتظر پاسخ ${playerName}…`} turnId={turn.id} isOwner={isOwner === true} />
+            ))}
+
+          {turn.status === "CONFIRMING" && (
+            <ConfirmRow
+              turnId={turn.id}
+              isMine={isMine}
+              isOwner={isOwner === true}
+              playerName={playerName}
+              alreadyConfirmed={turn.confirmations.includes(selfId)}
+            />
+          )}
+        </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * What the current turn is about, in one quiet line.
+ *
+ * Deliberately smaller, dimmer and left-aligned next to its badge, so it reads
+ * as a label for the buttons underneath rather than competing with the card in
+ * the stream that it is reminding you of.
+ */
+function PromptReminder({ prompt }: { prompt: Prompt }) {
+  const dare = prompt.type === "DARE";
+  return (
+    <div
+      key={prompt.id}
+      className="animate-swap-in flex items-start gap-2 rounded-field bg-surface-3/50 px-3 py-2"
+    >
+      <span
+        className={`mt-px shrink-0 rounded-full px-2 py-0.5 text-[10px] font-extrabold ${
+          dare ? "bg-ok/20 text-ok" : "bg-brand/25 text-brand-soft"
+        }`}
+      >
+        {dare ? "جرئت" : "حقیقت"}
+      </span>
+      <p className="line-clamp-2 min-w-0 flex-1 text-[12.5px] leading-relaxed text-muted">
+        {prompt.text}
+      </p>
     </div>
   );
 }
@@ -128,14 +179,28 @@ function StartBar({
 }: {
   conversationId: string;
   ended: boolean;
-  isOwner: boolean;
+  isOwner: boolean | null;
 }) {
   const start = useGame((s) => s.start);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  if (isOwner === null) {
+    // Who may start is unknown until the conversation arrives, and saying
+    // "the owner will start it" to the owner is worse than saying nothing.
+    return (
+      <div className="border-t border-line-soft bg-surface-2/60 px-3 py-3">
+        <Skeleton className="mx-auto h-12 max-w-md rounded-field" />
+      </div>
+    );
+  }
+
   if (!isOwner) {
-    return <Strip>{ended ? "بازی تمام شد." : "هر وقت سازنده‌ی روم بخواهد بازی شروع می‌شود."}</Strip>;
+    return (
+      <Strip>
+        {ended ? "بازی تمام شد." : "هر وقت سازنده‌ی روم بخواهد بازی شروع می‌شود."}
+      </Strip>
+    );
   }
 
   return (
