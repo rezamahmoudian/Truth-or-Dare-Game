@@ -11,6 +11,7 @@ import {
 import { useSession } from "@/store/session";
 import { Avatar, AVATAR_KEYS } from "@/ui/Avatar";
 import { Button } from "@/ui/Button";
+import { ChevronIcon } from "@/ui/icons";
 
 const MIN_AGE = 18;
 
@@ -58,10 +59,12 @@ export function Onboarding() {
 
   return (
     <div className="flex h-[100dvh] flex-col">
-      <ProgressBar step={step} total={3} />
+      <ProgressBar step={step} total={3} onBack={step > 0 ? () => setStep(step - 1) : undefined} />
 
       <div className="flex-1 overflow-y-auto overscroll-contain px-5 py-6">
-        <div className="mx-auto flex max-w-md flex-col gap-6">
+        {/* Keyed on the step so each one arrives rather than replacing the
+            last in place. */}
+        <div key={step} className="animate-swap-in mx-auto flex max-w-md flex-col gap-6">
           {step === 0 && (
             <StepName
               displayName={displayName}
@@ -72,6 +75,8 @@ export function Onboarding() {
           )}
 
           {step === 1 && <StepGender gender={gender} setGender={setGender} />}
+
+          {step === 3 && <Finishing />}
 
           {step === 2 && (
             <StepBirthDate
@@ -132,12 +137,42 @@ export function Onboarding() {
   );
 }
 
-function ProgressBar({ step, total }: { step: number; total: number }) {
+/**
+ * Progress, plus the way back.
+ *
+ * Going back matters more here than it looks: a typo in the name is otherwise
+ * unfixable until the whole sign-up is over, and the first thing this screen
+ * asks for is the name everyone else will see.
+ */
+function ProgressBar({
+  step,
+  total,
+  onBack,
+}: {
+  step: number;
+  total: number;
+  onBack?: () => void;
+}) {
   return (
     <div
       className="shrink-0 px-5 pb-2 pt-4"
       style={{ paddingTop: "max(1rem, env(safe-area-inset-top))" }}
     >
+      <div className="mx-auto mb-3 flex h-8 max-w-md items-center">
+        {onBack && (
+          <button
+            type="button"
+            onClick={onBack}
+            className="press -ms-2 grid size-8 place-items-center rounded-full text-muted"
+            aria-label="مرحله‌ی قبل"
+          >
+            <ChevronIcon size={20} />
+          </button>
+        )}
+        <span className="ms-auto text-[12px] text-faint">
+          مرحله‌ی {faNum(step + 1)} از {faNum(total)}
+        </span>
+      </div>
       <div className="mx-auto flex max-w-md gap-1.5">
         {Array.from({ length: total }, (_, i) => (
           <span
@@ -148,6 +183,24 @@ function ProgressBar({ step, total }: { step: number; total: number }) {
           />
         ))}
       </div>
+    </div>
+  );
+}
+
+/**
+ * Between the last save and the app deciding the account is ready.
+ *
+ * It is usually one frame. But the alternative — advancing to a step with no
+ * content — is a blank screen with a progress bar on it, and that is what
+ * somebody would be left staring at if the account ever failed to flip over.
+ */
+function Finishing() {
+  return (
+    <div className="flex flex-col items-center gap-3 py-16 text-center">
+      <span className="animate-pulse-soft grid size-16 place-items-center rounded-full bg-surface-2 text-3xl">
+        🎲
+      </span>
+      <p className="text-[15px] text-muted">داریم آماده‌ات می‌کنیم…</p>
     </div>
   );
 }
