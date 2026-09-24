@@ -272,6 +272,24 @@ async def two_player_game():
     check("recorded as stopped, not completed",
           session.ended_reason == "stopped", session.ended_reason)
 
+    # --- the app still knows a game was played -----------------------------
+    # The socket announces the ending, but reopening the screen refetches. If
+    # that came back empty the app would offer "start a game" to two people
+    # who had just finished one, and the fact they played would vanish.
+    _, state = http("GET", f"/conversations/{conv_id}/game/", a.token)
+    check("a refetch still reports the finished game",
+          state["session"] is not None and state["session"]["status"] == "ENDED",
+          str(state["session"] and state["session"]["status"]))
+    check("with no live turn hanging off it", state["turn"] is None)
+
+    # --- and another one can start -----------------------------------------
+    code_, again = http("POST", f"/conversations/{conv_id}/game/", a.token)
+    check("another game can start after one ended",
+          code_ == 201 and again["session"]["status"] == "ACTIVE", str(code_))
+    check("and it is a new session, not the old one revived",
+          again["session"]["id"] != session_id,
+          f'{again["session"]["id"]} vs {session_id}')
+
     for player in (a, b):
         await player.close()
 

@@ -78,10 +78,32 @@ def confirmed_by(turn: Turn) -> list[int]:
     return list(turn.confirmations.values_list("user_id", flat=True))
 
 
+def latest_session(conversation_id) -> GameSession | None:
+    """The newest game in this conversation, running or finished.
+
+    Distinct from `active_session`, which means "a game is in progress" and is
+    what the rules check. This one is for display: a screen opened after a game
+    ended still has to know that one ended, otherwise the app offers "start a
+    game" to people who just finished one and the fact that they played at all
+    disappears on the next reload.
+    """
+    return (
+        GameSession.objects.filter(conversation_id=conversation_id)
+        .order_by("-id")
+        .first()
+    )
+
+
 def state_of(conversation_id) -> dict:
-    session = active_session(conversation_id)
+    session = latest_session(conversation_id)
     if session is None:
         return session_payload(None)
+
+    # A finished game has no turn to act on; every open turn was closed when it
+    # ended. Sending the last one would invite the UI to render a dead turn.
+    if session.status != SessionStatus.ACTIVE:
+        return session_payload(session, None)
+
     turn = current_turn(session)
     return session_payload(
         session,

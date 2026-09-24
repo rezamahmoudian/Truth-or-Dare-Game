@@ -65,12 +65,11 @@ export const useGame = create<GameStore>((set, get) => ({
 
   async stop(conversationId) {
     await api.stopGame(conversationId);
-    set((store) => ({
-      byConversation: {
-        ...store.byConversation,
-        [conversationId]: { session: null, turn: null },
-      },
-    }));
+    // Not blanked locally. The server publishes the ended session over the
+    // socket, so inventing `session: null` here both contradicted it and
+    // raced it — whichever landed last won. Re-reading asks for the truth and
+    // also covers the case where the socket happens to be down.
+    await get().load(conversationId);
   },
 
   choose(turnId, choice) {
