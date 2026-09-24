@@ -8,7 +8,7 @@ type GameStore = {
   byConversation: Record<string, GameState>;
   init: () => void;
   load: (conversationId: string) => Promise<void>;
-  start: (conversationId: string, maxIntensity: number, rounds: number) => Promise<void>;
+  start: (conversationId: string, maxIntensity: number) => Promise<void>;
   stop: (conversationId: string) => Promise<void>;
   choose: (turnId: number, choice: "TRUTH" | "DARE") => void;
   answer: (turnId: number, body: string) => void;
@@ -54,10 +54,9 @@ export const useGame = create<GameStore>((set, get) => ({
     }));
   },
 
-  async start(conversationId, maxIntensity, rounds) {
+  async start(conversationId, maxIntensity) {
     const state = await api.startGame(conversationId, {
       max_intensity: maxIntensity,
-      rounds,
     });
     set((store) => ({
       byConversation: { ...store.byConversation, [conversationId]: state },

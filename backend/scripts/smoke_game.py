@@ -178,11 +178,10 @@ async def two_player_game():
     _, state = http("GET", f"/conversations/{conv_id}/game/", a.token)
     check("a room does not start a game by itself", state["session"] is None)
 
-    status, _ = http("POST", f"/conversations/{conv_id}/game/", b.token, {"rounds": 2})
+    status, _ = http("POST", f"/conversations/{conv_id}/game/", b.token)
     check("only the owner can start it", status == 403, str(status))
 
-    status, started = http("POST", f"/conversations/{conv_id}/game/", a.token,
-                           {"rounds": 2})
+    status, started = http("POST", f"/conversations/{conv_id}/game/", a.token)
     check("the owner starts it", status == 201 and started["session"]["status"] == "ACTIVE")
 
     turn = started["turn"]
@@ -238,6 +237,41 @@ async def two_player_game():
     check("a non-owner cannot force the game on",
           bool(await wait_error(b, "not_room_owner")))
 
+    # --- the game has no finish line ---------------------------------------
+    # The old engine ended a two-player game after six turns. Driving it well
+    # past that and finding it still running is the point of the change: how
+    # long a game lasts is the players' decision, not the software's.
+    state = forced
+    for _ in range(9):
+        open_turn = state["turn"]
+        await a.send("game.force_next", {"turn_id": open_turn["id"]})
+        moved = await wait_turn(
+            a, lambda t, seen=open_turn["index"]: t["index"] > seen
+        )
+        if moved is None:
+            break
+        state = moved
+
+    check("a two-player game runs past the old six-turn limit",
+          bool(state) and state["turn"]["index"] >= 8,
+          f'reached turn {state["turn"]["index"]}' if state else "stalled")
+
+    session_id = state["session"]["id"]
+    session = await db(load_session, session_id)
+    check("and it is still running", session.status == "ACTIVE", session.status)
+    check("with no total to count towards", "total_turns" not in state["session"])
+
+    # --- it ends when, and only when, somebody ends it ---------------------
+    code_, _ = http("DELETE", f"/conversations/{conv_id}/game/", b.token)
+    check("a non-owner cannot end the game", code_ == 403, str(code_))
+
+    code_, _ = http("DELETE", f"/conversations/{conv_id}/game/", a.token)
+    check("the owner ends it", code_ == 204, str(code_))
+    session = await db(load_session, session_id)
+    check("and then it is over", session.status == "ENDED", session.status)
+    check("recorded as stopped, not completed",
+          session.ended_reason == "stopped", session.ended_reason)
+
     for player in (a, b):
         await player.close()
 
@@ -257,8 +291,7 @@ async def group_game():
     for player in players:
         await player.connect(conv_id)
 
-    _, started = http("POST", f"/conversations/{conv_id}/game/", owner.token,
-                      {"rounds": 1})
+    _, started = http("POST", f"/conversations/{conv_id}/game/", owner.token)
     turn = started["turn"]
     by_id = {p.id: p for p in players}
     current = by_id[turn["player_id"]]

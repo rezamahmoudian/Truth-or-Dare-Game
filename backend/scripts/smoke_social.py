@@ -193,8 +193,7 @@ async def main():
     # --- a game inside the friend chat --------------------------------------
     # The same engine as a matched room, because a session hangs off a
     # conversation rather than the other way round.
-    status, started = http("POST", f"/conversations/{conversation_id}/game/", a.token,
-                           {"rounds": 1})
+    status, started = http("POST", f"/conversations/{conversation_id}/game/", a.token)
     check("a game can be started inside a private chat",
           status == 201 and started["session"]["status"] == "ACTIVE", str(status))
     check("it has a turn open and both friends in the order",

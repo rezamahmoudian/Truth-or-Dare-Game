@@ -243,7 +243,6 @@ class AppConsumer(AsyncJsonWebsocketConsumer):
             participant.conversation,
             category=str(data.get("category") or ""),
             max_intensity=int(data.get("max_intensity") or 2),
-            rounds=data.get("rounds"),
         )
 
     async def _on_game_choose(self, data) -> None:

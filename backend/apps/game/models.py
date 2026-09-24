@@ -78,7 +78,6 @@ class GameSession(models.Model):
     # removed from it rather than the order being recomputed each turn.
     turn_order = models.JSONField(default=list)
     turn_index = models.PositiveIntegerField(default=0)
-    rounds = models.PositiveSmallIntegerField(default=3)
 
     category = models.CharField(
         max_length=10, choices=Category.choices, blank=True
@@ -103,16 +102,16 @@ class GameSession(models.Model):
         return f"session {self.pk} in {self.conversation_id} ({self.status})"
 
     @property
-    def total_turns(self) -> int:
-        """How many turns this game is expected to run — a display figure.
+    def round_number(self) -> int:
+        """Which time around the table this is — a display figure only.
 
-        Deliberately *not* used to decide when the game ends. It is derived
-        from the current player list, so a player leaving shrinks it; an
-        earlier version ended the game on `turn_index >= total_turns` and a
-        single departure could declare a game finished halfway through.
-        Completion is decided per player in `services._is_complete`.
+        A game has no planned length: it runs until somebody ends it, exactly
+        like the room it lives in. Nothing here decides when the game is over,
+        and there is deliberately no total to count towards.
         """
-        return len(self.turn_order) * self.rounds
+        if not self.turn_order:
+            return 1
+        return self.turn_index // len(self.turn_order) + 1
 
 
 class Turn(models.Model):

@@ -99,17 +99,27 @@ failure is a silent event-loop stall under load, not an exception.
 a turn, never picks the next player, never decides a timeout expired. Clients
 render what the server says.
 
-**Guard every Celery timer with `Turn.version`.** Schedule the timeout task,
-but before it acts, re-read the turn and compare versions; if the player
-answered at the last second, the version moved and the stale task must do
-nothing. Without this guard you get a race that corrupts turn order and is
-miserable to reproduce.
+**There are no timers anywhere in the game.** The state machine is
+`CHOOSING → ANSWERING → CONFIRMING → next turn`, and every arrow is pulled by a
+person. Nothing expires, nothing is scheduled, no Celery task advances a turn.
+A room may sit on one turn for an hour while the players talk about something
+else — that conversation *is* the product, and a countdown would cut it off.
 
-**Do not rush the REVIEW phase.** The state machine is
-`CHOOSING → ANSWERING → REVIEW → next turn`. REVIEW — where everyone reacts and
-talks about the answer — is where the product's actual value happens. Give it
-real time (~20–30s) and make it feel like an invitation to talk, not a
-countdown to the next card.
+**A turn advances only by human confirmation.** With two players the opponent
+confirms, and the turn then becomes theirs. In a group, more than half of
+everyone except the answerer. And the room owner alone, at any moment, with or
+without an answer — so there is always somebody who can unstick a turn, and
+ownership passes to the oldest remaining member if the owner leaves.
+
+**A game has no planned length.** No round count, no turn cap, nothing to be a
+fraction of. It ends when the owner ends it or when fewer than two players
+remain — the same rule the room itself follows. Count turns upward for display
+("round 3 · turn 7"); never show "7 of 12", because there is no 12.
+
+The general principle behind all three: **the software never decides that
+people are finished.** Anything that would end, expire or cap something on the
+users' behalf needs a very good reason, and "it keeps the game tidy" is not
+one.
 
 **A player leaving mid-game is a defined transition, not an exception.** Decide
 and implement: reassign the turn if it was theirs, continue if quorum holds,
@@ -160,9 +170,11 @@ Persian and RTL.
   page itself scroll.
 - Touch targets at least 44px.
 - Self-host Vazirmatn; do not load fonts from Google Fonts.
-- **The app must be fully playable with no push notifications.** Turn timers are
-  server-side, presence and invites arrive over the WebSocket, and in-app
-  notification UI covers the rest. Web push on Android routes through Google's
+- **The app must be fully playable with no push notifications.** This is
+  easier than it sounds here, because nothing in the app expires: no turn times
+  out and no game ends on its own, so opening the app late costs nothing.
+  Presence and invites arrive over the WebSocket and in-app notification UI
+  covers the rest. Web push on Android routes through Google's
   FCM endpoints, which are not reliably reachable for Iranian users — treat push
   as a bonus that may silently never arrive, never as a load-bearing dependency.
 - Distribution assumes direct APK download plus Iranian stores (Bazaar, Myket)
@@ -189,8 +201,8 @@ answer gets pulled.
 
 From the first phase: structured logging, a `/health` endpoint, Sentry, and
 counters for the events that reveal where users drop — `mm.enqueue`,
-`mm.matched`, `mm.expired`, game completed, friend request sent, friend request
-accepted, message sent. Without those numbers, arguments about why retention is
+`mm.matched`, `mm.expired`, game started, game ended (with its reason), friend
+request sent, friend request accepted, message sent. Without those numbers, arguments about why retention is
 bad become guesswork.
 
 ---

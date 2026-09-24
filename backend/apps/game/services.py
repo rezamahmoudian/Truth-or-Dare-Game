@@ -28,7 +28,6 @@ belongs to nobody.
 
 import logging
 import random
-from collections import Counter
 
 from django.db import transaction
 from django.db.models import Count
@@ -198,9 +197,11 @@ def start_game(
     *,
     category: str = "",
     max_intensity: int = 2,
-    rounds: int | None = None,
 ) -> GameSession:
     """Start a game. Rooms are started by their owner; private chats by either.
+
+    The game has no planned length. It keeps dealing turns around the table
+    until somebody ends it — the same rule the room itself follows.
 
     A matched room no longer starts a game by itself. Two strangers dropped
     straight into a turn have to perform before they have said hello; letting
@@ -228,7 +229,6 @@ def start_game(
     session = GameSession.objects.create(
         conversation=conversation,
         turn_order=player_ids,
-        rounds=rounds or 3,
         category=category,
         max_intensity=max(1, min(3, max_intensity)),
         started_by=user,
@@ -416,28 +416,20 @@ def _close_turn(turn: Turn, status: str, verb: str = "") -> Turn:
     return turn
 
 
-def _is_complete(session: GameSession) -> bool:
-    """The game is over once every remaining player has had their rounds.
-
-    Counting per player rather than comparing a running index against a total
-    is what makes this survive people leaving: a departure removes someone from
-    the check instead of moving the finish line.
-    """
-    taken = Counter(session.turns.values_list("player_id", flat=True))
-    return all(
-        taken.get(player_id, 0) >= session.rounds for player_id in session.turn_order
-    )
-
-
 def _advance(session: GameSession) -> Turn | None:
+    """Open the next turn. There is no finish line.
+
+    A game used to stop once everyone had taken their rounds, which meant the
+    software decided when people were done talking. Now the only things that
+    end a game are somebody ending it and the room emptying out below two
+    players — the same shape as every other rule here, where nothing expires
+    on its own and no clock overrules the people playing.
+    """
     session.turn_index += 1
     session.save(update_fields=["turn_index"])
 
     if len(session.turn_order) < MIN_PLAYERS:
         end_game(session, "not_enough_players")
-        return None
-    if _is_complete(session):
-        end_game(session, "completed")
         return None
 
     return _open_turn(session)
@@ -463,9 +455,17 @@ def end_game(session: GameSession, reason: str) -> None:
         extra={"event": "game.ended", "session_id": session.pk, "reason": reason},
     )
 
+    # There is no "completed" any more — a game only ends because somebody
+    # ended it or because the room ran out of players, and the line in the
+    # chat should say which.
+    notice = {
+        "stopped": "بازی تمام شد.",
+        "not_enough_players": "بازی متوقف شد — نفر کافی نمانده.",
+    }.get(reason, "بازی متوقف شد.")
+
     chat_services.post_system_message(
         session.conversation,
-        "بازی تمام شد." if reason == "completed" else "بازی متوقف شد.",
+        notice,
         meta={"game": "ended", "reason": reason},
     )
     transaction.on_commit(lambda: _publish(session, None))

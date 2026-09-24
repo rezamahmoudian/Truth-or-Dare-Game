@@ -6,7 +6,7 @@ export const fetchGameState = (conversationId: string) =>
 
 export const startGame = (
   conversationId: string,
-  options: { category?: string; max_intensity?: number; rounds?: number } = {},
+  options: { category?: string; max_intensity?: number } = {},
 ) =>
   authFetch<GameState>(`/conversations/${conversationId}/game/`, {
     method: "POST",

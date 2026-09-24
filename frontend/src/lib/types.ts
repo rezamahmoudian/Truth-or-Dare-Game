@@ -136,8 +136,8 @@ export type GameSession = {
   status: "ACTIVE" | "ENDED";
   turn_order: number[];
   turn_index: number;
-  total_turns: number;
-  rounds: number;
+  /** Which time around the table — display only; a game has no planned end. */
+  round_number: number;
   category: string;
   max_intensity: number;
   ended_reason: string;

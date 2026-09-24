@@ -29,7 +29,7 @@ class TurnInline(admin.TabularInline):
 
 @admin.register(GameSession)
 class GameSessionAdmin(admin.ModelAdmin):
-    list_display = ("id", "conversation", "status", "turn_index", "rounds", "started_at")
+    list_display = ("id", "conversation", "status", "turn_index", "started_at")
     list_filter = ("status", "category")
     raw_id_fields = ("conversation", "started_by")
     inlines = [TurnInline]

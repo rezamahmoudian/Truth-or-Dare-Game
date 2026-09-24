@@ -65,26 +65,24 @@ export function GamePanel({
       key={`turn-${turn.id}`}
     >
       <div className="mx-auto flex max-w-md flex-col gap-2.5">
-        <div className="flex items-center justify-between text-[11px] text-faint">
-          <span className="flex items-center gap-1.5">
-            {/* A row of pips rather than a bare fraction: progress you can
-                read without doing arithmetic. */}
-            <span className="flex gap-0.5" aria-hidden>
-              {Array.from({ length: Math.min(session.total_turns, 12) }, (_, i) => (
-                <span
-                  key={i}
-                  className={`h-1 w-1.5 rounded-full ${
-                    i <= session.turn_index ? "bg-brand" : "bg-line"
-                  }`}
-                />
-              ))}
-            </span>
-            نوبت {faNum(session.turn_index + 1)} از {faNum(session.total_turns)}
+        <div className="flex items-center gap-2 text-[11px] text-faint">
+          {/* No progress bar and no "x of y": the game runs until somebody
+              ends it, so there is nothing to be a fraction of. Counting up is
+              the honest display. */}
+          <span>
+            دور {faNum(session.round_number)} · نوبت {faNum(session.turn_index + 1)}
           </span>
+
           {turn.status === "CONFIRMING" && turn.confirmations_required > 1 && (
             <span className="rounded-full bg-surface-3 px-2 py-0.5">
               {faNum(turn.confirmations.length)} از{" "}
               {faNum(turn.confirmations_required)} تأیید
+            </span>
+          )}
+
+          {isOwner === true && (
+            <span className="ms-auto">
+              <EndGameButton conversationId={conversationId} />
             </span>
           )}
         </div>
@@ -159,6 +157,59 @@ function PromptReminder({ prompt }: { prompt: Prompt }) {
   );
 }
 
+/**
+ * Ends the game for everybody, so it asks first.
+ *
+ * Not destructive — every prompt and answer stays in the chat, and the room
+ * itself is untouched — but it does stop something other people are in the
+ * middle of, and this button sits a few millimetres from the turn counter.
+ */
+function EndGameButton({ conversationId }: { conversationId: string }) {
+  const stop = useGame((s) => s.stop);
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  if (!confirming) {
+    return (
+      <button
+        type="button"
+        onClick={() => setConfirming(true)}
+        className="press surface-raised rounded-full px-2.5 py-1 text-[11px] text-faint"
+      >
+        پایان بازی
+      </button>
+    );
+  }
+
+  return (
+    <span className="flex items-center gap-1.5">
+      <span className="text-[11px]">تمامش کنم؟</span>
+      <button
+        type="button"
+        disabled={busy}
+        onClick={async () => {
+          setBusy(true);
+          try {
+            await stop(conversationId);
+          } finally {
+            setBusy(false);
+          }
+        }}
+        className="press rounded-full bg-bad px-2.5 py-1 text-[11px] font-bold text-white disabled:opacity-50"
+      >
+        آره
+      </button>
+      <button
+        type="button"
+        onClick={() => setConfirming(false)}
+        className="press surface-raised rounded-full px-2.5 py-1 text-[11px]"
+      >
+        نه
+      </button>
+    </span>
+  );
+}
+
 function Strip({ children }: { children: React.ReactNode }) {
   return (
     <div className="border-t border-line-soft bg-surface-2/60 px-3 py-3 text-center text-[13px] text-muted">
@@ -213,7 +264,7 @@ function StartBar({
             setBusy(true);
             setError(null);
             try {
-              await start(conversationId, 2, 3);
+              await start(conversationId, 2);
             } catch (err) {
               setError(
                 err instanceof ApiError

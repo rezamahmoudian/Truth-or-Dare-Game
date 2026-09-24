@@ -29,7 +29,6 @@ class GameStateView(APIView):
             participant.conversation,
             category=str(request.data.get("category") or ""),
             max_intensity=int(request.data.get("max_intensity") or 2),
-            rounds=request.data.get("rounds"),
         )
         return Response(
             services.state_of(conversation_id), status=status.HTTP_201_CREATED

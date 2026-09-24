@@ -28,7 +28,6 @@ class MatchMode(models.Model):
 
     category = models.CharField(max_length=10, choices=Category.choices, blank=True)
     max_intensity = models.PositiveSmallIntegerField(default=2)
-    rounds = models.PositiveSmallIntegerField(default=3)
 
     min_age = models.PositiveSmallIntegerField(default=18)
     requires_premium = models.BooleanField(default=False)
