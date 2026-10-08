@@ -1,10 +1,14 @@
+from django.db import transaction
+from django.http import FileResponse
 from rest_framework import status
+from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.chat import services
-from apps.chat.models import Conversation
+from apps.chat.attachments import inspect_upload, private_storage
+from apps.chat.models import Conversation, Message, MessageType
 from apps.chat.payloads import conversation_payload, message_payload
 from apps.core.errors import DomainError
 
@@ -132,6 +136,76 @@ class MessageListView(APIView):
             message_payload(message),
             status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
         )
+
+
+class AttachmentUploadView(APIView):
+    permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser]
+    throttle_scope = "chat_upload"
+
+    def post(self, request, conversation_id):
+        services.active_participant(request.user, conversation_id)
+        upload = request.FILES.get("file")
+        client_id = str(request.data.get("client_id", ""))
+        if not upload or not client_id or len(client_id) > 40:
+            raise DomainError("invalid_upload", "فایل و شناسهٔ ارسال معتبر لازم است.")
+        name, info = inspect_upload(upload, request.data.get("voice") == "true")
+        storage = private_storage()
+        saved_name = None
+        try:
+            with transaction.atomic():
+                conversation = Conversation.objects.select_for_update().get(pk=conversation_id)
+                services.active_participant(request.user, conversation_id)
+                existing = Message.objects.filter(conversation=conversation, client_id=client_id).first()
+                if existing:
+                    if existing.sender_id != request.user.pk:
+                        raise DomainError("client_id_conflict", "شناسهٔ ارسال تکراری است.", 409)
+                    return Response(message_payload(existing))
+                saved_name = storage.save(name, upload)
+                message, created = services.post_message(
+                    conversation=conversation,
+                    sender=request.user,
+                    body=str(request.data.get("body", "")),
+                    client_id=client_id,
+                    message_type=MessageType.ATTACHMENT,
+                    attachment_name=saved_name,
+                    attachment_info=info,
+                )
+                if not created:
+                    storage.delete(saved_name)
+                    saved_name = None
+        except Exception:
+            # Storage is outside the DB transaction; clean up failed uploads.
+            if saved_name and not Message.objects.filter(attachment=saved_name).exists():
+                storage.delete(saved_name)
+            raise
+        return Response(message_payload(message), status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
+
+
+class AttachmentDownloadView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, conversation_id, message_id):
+        participant = services.active_participant(request.user, conversation_id)
+        message = Message.objects.filter(
+            pk=message_id, conversation_id=conversation_id,
+            id__gt=participant.cleared_before_id, is_deleted=False,
+        ).first()
+        if not message or not message.attachment:
+            raise DomainError("file_not_found", "فایل پیدا نشد.", 404)
+        try:
+            file = private_storage().open(message.attachment.name, "rb")
+        except FileNotFoundError as exc:
+            raise DomainError("file_not_found", "فایل در دسترس نیست.", 404) from exc
+        response = FileResponse(
+            file, as_attachment=True,
+            filename=message.attachment_info.get("name", "file"),
+            content_type=message.attachment_info.get("mime", "application/octet-stream"),
+        )
+        response["Cache-Control"] = "private, no-store"
+        response["X-Content-Type-Options"] = "nosniff"
+        response["Content-Security-Policy"] = "sandbox; default-src 'none'"
+        return response
 
 
 class MarkReadView(APIView):

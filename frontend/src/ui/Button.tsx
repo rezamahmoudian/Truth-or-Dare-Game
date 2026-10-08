@@ -3,13 +3,11 @@ import type { ButtonHTMLAttributes } from "react";
 type Variant = "primary" | "ghost" | "success" | "danger";
 
 const VARIANTS: Record<Variant, string> = {
-  // A gradient rather than a flat fill: on a dark screen a single solid violet
-  // reads as a sticker, while a two-stop fill gives the button a lit top edge
-  // and a shadow that belongs to it.
+  // Shared violet actions keep their contrast on the light pastel surfaces.
   primary:
     "bg-gradient-to-b from-brand-soft to-brand text-white shadow-[0_6px_18px_-8px_var(--color-brand)]",
   success:
-    "bg-gradient-to-b from-ok to-ok-deep text-ink shadow-[0_6px_18px_-8px_var(--color-ok)]",
+    "bg-gradient-to-b from-ok to-ok-deep text-white shadow-[0_6px_18px_-8px_var(--color-ok)]",
   danger: "bg-bad text-white",
   ghost: "surface-raised text-text",
 };

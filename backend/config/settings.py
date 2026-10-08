@@ -53,6 +53,7 @@ LOCAL_APPS = [
     "apps.game",
     "apps.matchmaking",
     "apps.moderation",
+    "apps.ai_players",
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
@@ -152,6 +153,8 @@ REST_FRAMEWORK = {
     # left unset in dev, where requests really do come from the client.
     "NUM_PROXIES": env.int("NUM_PROXIES", default=None),
     "DEFAULT_THROTTLE_RATES": {
+        "chat_upload": "60/hour",
+        "ai_retry": "10/hour",
         # The guest endpoint mints accounts for anyone who asks, so it is the
         # obvious target for someone scripting a few thousand of them.
         "auth": env("THROTTLE_AUTH", default="20/hour"),
@@ -200,6 +203,20 @@ MATCH_RECENT_PARTNER_MINUTES = env.int("MATCH_RECENT_PARTNER_MINUTES", default=3
 # How recently someone must have been seen to count as "around" on the lobby.
 LOBBY_ACTIVE_MINUTES = env.int("LOBBY_ACTIVE_MINUTES", default=10)
 
+# Server-only credentials. Off until the operator supplies a key and enables AI.
+AI_PLAYERS_ENABLED = env.bool("AI_PLAYERS_ENABLED", default=False)
+OPENAI_API_KEY = env("OPENAI_API_KEY", default="")
+OPENAI_BASE_URL = env("OPENAI_BASE_URL", default="https://api.openai.com/v1").rstrip("/")
+# Server-only headers required by some Responses-compatible providers.
+OPENAI_EXTRA_HEADERS = env.json("OPENAI_EXTRA_HEADERS", default={})
+OPENAI_MODEL = env("OPENAI_MODEL", default="gpt-4.1-mini")
+AI_REQUEST_TIMEOUT = env.int("AI_REQUEST_TIMEOUT", default=30)
+AI_MAX_OUTPUT_TOKENS = env.int("AI_MAX_OUTPUT_TOKENS", default=500)
+AI_DAILY_REQUEST_LIMIT = env.int("AI_DAILY_REQUEST_LIMIT", default=1000)
+AI_USER_DAILY_REQUEST_LIMIT = env.int("AI_USER_DAILY_REQUEST_LIMIT", default=100)
+AI_HISTORY_MESSAGES = env.int("AI_HISTORY_MESSAGES", default=24)
+AI_MESSAGE_BATCH_SECONDS = env.float("AI_MESSAGE_BATCH_SECONDS", default=1.5)
+
 # --------------------------------------------------------------------------
 # Localisation — the product is Persian and RTL
 # --------------------------------------------------------------------------
@@ -217,6 +234,8 @@ STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 MEDIA_URL = "media/"
 MEDIA_ROOT = BASE_DIR / "media"
+PRIVATE_MEDIA_ROOT = BASE_DIR / "private_media"
+CHAT_UPLOAD_MAX_BYTES = 25 * 1024 * 1024
 
 # Message ids must be bigints so unread counts and cursor pagination reduce to
 # integer comparison. See the project architecture rules.
@@ -235,6 +254,16 @@ CORS_ALLOW_CREDENTIALS = True
 # --------------------------------------------------------------------------
 
 CSRF_TRUSTED_ORIGINS = env.list("CSRF_TRUSTED_ORIGINS", default=[])
+
+# Vite proxies /admin/ to Django in development. Its browser Origin remains
+# localhost:5173, while the proxy forwards a backend Host, so Django needs the
+# development frontend origin explicitly for the admin login POST.
+if DEBUG:
+    CSRF_TRUSTED_ORIGINS = list(dict.fromkeys([
+        *CSRF_TRUSTED_ORIGINS,
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ]))
 
 if not DEBUG:
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")

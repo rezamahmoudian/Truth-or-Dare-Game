@@ -1,0 +1,27 @@
+{% extends "admin/change_list.html" %}
+
+{% block extrastyle %}
+  {{ block.super }}
+  <style>
+    #result_list .field-full_text { min-width: 260px; max-width: 560px; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.9; }
+    #result_list .field-full_text a { white-space: inherit; }
+    .prompt-review-actions { display: inline-flex; gap: 6px; white-space: nowrap; }
+    .prompt-review-button { border: 0; border-radius: 6px; padding: 5px 10px; color: #fff; font: inherit; font-weight: 700; cursor: pointer; }
+    .prompt-review-button.approve { background: #177b55; }
+    .prompt-review-button.reject { background: #b42d4d; }
+    .prompt-review-button.save-category { background: #7151ad; margin-top: 6px; }
+    .field-category_control select { min-width: 110px; }
+    .prompt-review-button:hover { filter: brightness(1.12); }
+  </style>
+{% endblock %}
+
+{% block object-tools-items %}
+  <li><a href="{{ review_queue_url }}" class="button">صف بررسی و تأیید سؤال‌ها</a></li>
+  <li style="display:none">
+    <form id="prompt-quick-review-form" method="post" action="{{ quick_review_url }}">
+      {% csrf_token %}
+      <input type="hidden" name="return_to" value="{{ return_to_changelist }}">
+    </form>
+  </li>
+  {{ block.super }}
+{% endblock %}

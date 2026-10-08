@@ -54,7 +54,7 @@ export function OfflineBar() {
 
   return (
     <div
-      className="animate-fade-in fixed inset-x-0 top-0 z-[70] bg-warn px-4 text-center text-[12px] font-bold text-ink"
+      className="animate-fade-in fixed inset-x-0 top-0 z-[70] bg-warn px-4 text-center text-[12px] font-bold text-white"
       style={{ paddingTop: "env(safe-area-inset-top)" }}
       role="status"
     >

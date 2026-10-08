@@ -16,6 +16,7 @@ class MatchModeAdmin(admin.ModelAdmin):
         "daily_limit",
         "is_featured",
         "is_active",
+        "is_ai",
         "sort_order",
     )
     list_editable = ("is_featured", "is_active", "sort_order")

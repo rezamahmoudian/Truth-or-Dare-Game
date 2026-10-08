@@ -63,6 +63,7 @@ type ChatState = {
   closeConversation: () => void;
   loadOlder: (id: string) => Promise<void>;
   sendMessage: (id: string, body: string) => void;
+  receiveMessage: (message: Message) => void;
   retryMessage: (id: string, clientId: string) => void;
   setTyping: (id: string, isTyping: boolean) => void;
   toggleReaction: (id: string, messageId: number, emoji: string, has: boolean) => void;
@@ -297,6 +298,15 @@ export const useChat = create<ChatState>((set, get) => ({
       client_id: clientId,
       body: text,
     });
+  },
+
+  receiveMessage(message) {
+    set((state) => ({ messages: {
+      ...state.messages,
+      [message.conversation_id]: mergeMessage(state.messages[message.conversation_id] ?? [], message),
+    } }));
+    if (get().activeId === message.conversation_id) get().markRead(message.conversation_id);
+    void get().loadConversations().catch(() => undefined);
   },
 
   retryMessage(id, clientId) {

@@ -9,10 +9,10 @@ export const listModes = () => authFetch<MatchMode[]>("/match-modes/");
 export const getMatchStatus = () =>
   authFetch<MatchTicket | { state: "IDLE" }>("/match/");
 
-export const enqueue = (mode: string) =>
+export const enqueue = (mode: string, aiConsent = false) =>
   authFetch<MatchTicket>("/match/", {
     method: "POST",
-    body: JSON.stringify({ mode }),
+    body: JSON.stringify({ mode, ai_consent: aiConsent }),
   });
 
 export const cancelMatch = () => authFetch<null>("/match/", { method: "DELETE" });

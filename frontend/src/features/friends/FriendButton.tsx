@@ -35,7 +35,7 @@ export function FriendButton({
   if (state === "SELF" || state === "BLOCKED") return null;
 
   const size = compact
-    ? "min-h-9 px-3 text-[12px]"
+    ? "min-h-11 px-3 text-[12px]"
     : "min-h-11 px-4 text-[14px] w-full justify-center";
 
   async function run(action: () => Promise<unknown>) {
@@ -80,6 +80,7 @@ export function FriendButton({
 
   if (state === "INCOMING") {
     return (
+      <div className="flex flex-col gap-1">
       <button
         type="button"
         disabled={busy}
@@ -89,10 +90,12 @@ export function FriendButton({
             navigate(`/c/${conversationId}`);
           })
         }
-        className={`${base} bg-gradient-to-b from-ok to-ok-deep text-ink`}
+        className={`${base} bg-gradient-to-b from-ok to-ok-deep text-white`}
       >
         قبول درخواست
       </button>
+      {error && <span role="alert" className="text-[11px] text-bad">{error}</span>}
+      </div>
     );
   }
 

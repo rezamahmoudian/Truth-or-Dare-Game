@@ -98,6 +98,9 @@ def _resolve(user: User, other_id: int) -> User:
 @transaction.atomic
 def send_request(user: User, other_id: int) -> Friendship:
     other = _resolve(user, other_id)
+    list(User.objects.select_for_update().filter(pk__in=[user.pk, other.pk]).order_by("pk"))
+    # if other.is_ai:
+        # raise DomainError("ai_friend_request", "برای ادامه با این شخصیت از گفتگوی استفاده کن.", 409)
     existing = _pair(user, other)
 
     if existing and existing.status == FriendshipStatus.ACCEPTED:
@@ -143,11 +146,14 @@ def send_request(user: User, other_id: int) -> Friendship:
 @transaction.atomic
 def accept_request(user: User, other_id: int) -> Friendship:
     other = _resolve(user, other_id)
-    row = Friendship.objects.filter(
-        from_user=other, to_user=user, status=FriendshipStatus.PENDING
+    list(User.objects.select_for_update().filter(pk__in=[user.pk, other.pk]).order_by("pk"))
+    row = Friendship.objects.select_for_update().filter(
+        from_user=other, to_user=user, status__in=[FriendshipStatus.PENDING, FriendshipStatus.ACCEPTED]
     ).first()
     if row is None:
         raise DomainError("no_request", "درخواستی از این کاربر وجود ندارد.", 404)
+    if row.status == FriendshipStatus.ACCEPTED:
+        return row
 
     conversation = chat_services.get_or_create_direct(user, other)
 

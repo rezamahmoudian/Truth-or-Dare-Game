@@ -1,6 +1,6 @@
 from django.core.management.base import BaseCommand
 
-from apps.game.models import Prompt
+from apps.game.models import Prompt, PromptReviewStatus
 from apps.game.prompt_bank import PROMPTS
 
 
@@ -36,9 +36,11 @@ class Command(BaseCommand):
                 prompt.save(update_fields=list(defaults))
                 updated += 1
 
-        total = Prompt.objects.filter(is_active=True).count()
+        total = Prompt.objects.filter(
+            is_active=True, review_status=PromptReviewStatus.APPROVED
+        ).count()
         self.stdout.write(
             self.style.SUCCESS(
-                f"{created} added, {updated} updated — {total} active prompts"
+                f"{created} added, {updated} updated — {total} approved active prompts"
             )
         )

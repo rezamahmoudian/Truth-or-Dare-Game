@@ -15,6 +15,7 @@ from django.conf import settings
 # How long a heartbeat counts for. Comfortably longer than the client's ping
 # interval so one dropped packet does not make someone flicker offline.
 TTL_SECONDS = 45
+APP_ONLINE_KEY = "app:online"
 
 _pool = redis.ConnectionPool.from_url(settings.REDIS_URL, decode_responses=True)
 
@@ -47,3 +48,22 @@ def online_user_ids(conversation_id) -> list[int]:
     pipe.zrange(key, 0, -1)
     _, members = pipe.execute()
     return [int(member) for member in members]
+
+
+def mark_app_online(user_id: int, connection: str) -> None:
+    pipe = _client().pipeline()
+    pipe.zadd(APP_ONLINE_KEY, {f"{user_id}:{connection}": time.time()})
+    pipe.expire(APP_ONLINE_KEY, TTL_SECONDS * 4)
+    pipe.execute()
+
+
+def mark_app_offline(user_id: int, connection: str) -> None:
+    _client().zrem(APP_ONLINE_KEY, f"{user_id}:{connection}")
+
+
+def app_online_ids() -> list[int]:
+    pipe = _client().pipeline()
+    pipe.zremrangebyscore(APP_ONLINE_KEY, "-inf", time.time() - TTL_SECONDS)
+    pipe.zrange(APP_ONLINE_KEY, 0, -1)
+    _, members = pipe.execute()
+    return list({int(member.split(":", 1)[0]) for member in members})

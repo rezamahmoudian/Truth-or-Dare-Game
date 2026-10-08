@@ -1,7 +1,11 @@
+import { HeroCard, ModeCard, FriendsCard } from "@/features/play/ModeCards";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { GameInvitationsLink } from "@/features/play/GameInvitations";
+import { PersonProfileSheet } from "@/features/play/PersonProfileSheet";
 
 import { WaitingOverlay } from "@/features/play/WaitingOverlay";
+import { AIIntroSheet } from "@/features/play/AIIntroSheet";
 import { InstallBanner } from "@/features/pwa/PwaChrome";
 import { ApiError } from "@/lib/auth";
 import * as chatApi from "@/lib/chatApi";
@@ -12,50 +16,9 @@ import { useMatch } from "@/store/match";
 import { useSession } from "@/store/session";
 import { Avatar } from "@/ui/Avatar";
 import { Button } from "@/ui/Button";
-import {
-  BoltIcon,
-  ChatIcon,
-  ChevronIcon,
-  FlameIcon,
-  FriendsIcon,
-  KeyIcon,
-  PersonIcon,
-  SparkleIcon,
-} from "@/ui/icons";
+import { FlameIcon } from "@/ui/icons";
 import { Screen, Skeleton } from "@/ui/Screen";
 import { TabBar } from "@/ui/TabBar";
-
-/* Each mode carries its own accent. The tile, the icon and the status dot all
-   read from one token, so they cannot drift apart. */
-const MODE_TINT: Record<string, string> = {
-  quick: "var(--color-hot)",
-  group: "var(--color-mode-group)",
-  girls: "var(--color-mode-girls)",
-  boys: "var(--color-mode-boys)",
-  deep: "var(--color-mode-group)",
-  friends: "var(--color-mode-friends)",
-};
-
-const MODE_ICON: Record<string, typeof PersonIcon> = {
-  quick: BoltIcon,
-  group: FriendsIcon,
-  girls: PersonIcon,
-  boys: PersonIcon,
-  deep: ChatIcon,
-  friends: ChatIcon,
-};
-
-const QUEUE_LABEL: Record<string, string> = {
-  FAST: "صف پر — زود جفت می‌شی",
-  SLOW: "صف خلوته، کمی صبر کن",
-  EMPTY: "اولین نفر باش",
-};
-
-const QUEUE_DOT: Record<string, string> = {
-  FAST: "bg-ok",
-  SLOW: "bg-warn",
-  EMPTY: "bg-faint",
-};
 
 /**
  * Home.
@@ -86,10 +49,16 @@ export function PlayScreen() {
 
   const [error, setError] = useState<string | null>(null);
   const [showCode, setShowCode] = useState(false);
+  const [aiMode, setAIMode] = useState<MatchMode | null>(null);
+  const [selectedPerson, setSelectedPerson] = useState<Person | null>(null);
 
   useEffect(() => {
     void loadLobby().catch(() => undefined);
     void resume().catch(() => undefined);
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") void loadLobby().catch(() => undefined);
+    }, 30000);
+    return () => window.clearInterval(timer);
   }, [loadLobby, resume]);
 
   // A match arrives over the socket; the screen follows it into the room.
@@ -102,6 +71,7 @@ export function PlayScreen() {
 
   async function pick(mode: MatchMode) {
     setError(null);
+    if (mode.is_ai) { setAIMode(mode); return; }
     try {
       await enqueue(mode.key);
     } catch (err) {
@@ -119,11 +89,16 @@ export function PlayScreen() {
   return (
     <Screen header={<LobbyHeader streak={me?.streak_days ?? 0} />} footer={<TabBar />}>
       {ticket && <WaitingOverlay ticket={ticket} title={waitingTitle} />}
+      {selectedPerson && <PersonProfileSheet key={selectedPerson.id} person={selectedPerson} onClose={() => { setSelectedPerson(null); void loadLobby().catch(() => undefined); }} />}
+      {aiMode && <AIIntroSheet onClose={() => setAIMode(null)} onStart={async () => {
+        await enqueue(aiMode.key, true); setAIMode(null);
+      }} />}
 
       <div className="mx-auto flex max-w-md flex-col gap-5 px-4 pb-8 pt-1">
-        <p className="text-[17px] font-bold leading-relaxed">
-          سلام {me?.display_name}، امروز با کی آشنا می‌شی؟
-        </p>
+        <div className="lobby-greeting">
+          <div><h1>امروز چقدر <em>پایه‌ای؟</em></h1><p className="mt-1 text-xs leading-6 text-muted">یه کم جرئت، یه کم حقیقت، کلی خاطره.</p></div>
+          {onlineCount > 0 && <span className="online-pill"><span className="size-1.5 rounded-full bg-ok" />{faNum(onlineCount)} آنلاین</span>}
+        </div>
 
         {expired && (
           <div className="surface-card animate-rise rounded-card p-4 text-[14px] leading-relaxed">
@@ -148,17 +123,18 @@ export function PlayScreen() {
 
         {!loaded && <LobbySkeleton />}
 
-        {hero && <HeroCard mode={hero} onlineCount={onlineCount} onPick={pick} />}
+        {hero && <HeroCard mode={hero} onPick={pick} />}
 
         {rest.length > 0 && (
           <section>
-            <h2 className="mb-3 text-[17px] font-extrabold">حالت‌های دیگه</h2>
+            <div className="mb-3 flex items-center justify-between gap-2"><h2 className="text-[15px] font-extrabold">یا خودت انتخاب کن</h2><span className="text-[11px] text-muted">چه حال‌وهوایی داری؟</span></div>
             <div className="grid grid-cols-2 gap-3">
               {rest.map((mode) => (
                 <ModeCard key={mode.key} mode={mode} onPick={pick} />
               ))}
               <FriendsCard onOpen={() => setShowCode(true)} />
             </div>
+            <p className="lobby-caption"><span aria-hidden="true">✧</span> یه بازی ساده، شاید شروع یه رفاقت.</p>
           </section>
         )}
 
@@ -168,7 +144,7 @@ export function PlayScreen() {
           </p>
         )}
 
-        {activePeople.length > 0 && <ActiveNow people={activePeople} />}
+        <ActiveNow people={activePeople} onProfile={setSelectedPerson} />
 
         <InstallBanner />
 
@@ -194,9 +170,8 @@ function LobbyHeader({ streak }: { streak: number }) {
       className="bar-blur flex shrink-0 items-center gap-2 px-4 pb-3"
       style={{ paddingTop: "max(0.75rem, env(safe-area-inset-top))" }}
     >
-      <h1 className="flex-1 text-[26px] font-extrabold leading-none tracking-tight">
-        جرأت<span className="text-brand">.</span>
-      </h1>
+      <div className="flex min-w-0 flex-1 items-center gap-2.5"><span className="brand-symbol" aria-hidden="true">✦</span><div><p className="text-[22px] font-black leading-tight">جرأت<span className="text-brand">.</span></p><p className="text-[10px] text-muted">جرئت یا حقیقت آنلاین</p></div></div>
+      <GameInvitationsLink />
 
       {streak > 0 && (
         <span className="flex items-center gap-1 rounded-full bg-surface-3 px-3 py-1.5 text-[13px] font-bold">
@@ -214,7 +189,7 @@ function LobbyHeader({ streak }: { streak: number }) {
         aria-label="پروفایل"
       >
         <Avatar
-          avatarKey={me?.avatar || "a1"}
+          photoUrl={me?.avatar_url} avatarKey={me?.avatar || "a1"}
           name={me?.display_name ?? ""}
           size={40}
           glow
@@ -224,148 +199,19 @@ function LobbyHeader({ streak }: { streak: number }) {
   );
 }
 
-function HeroCard({
-  mode,
-  onlineCount,
-  onPick,
-}: {
-  mode: MatchMode;
-  onlineCount: number;
-  onPick: (mode: MatchMode) => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={() => onPick(mode)}
-      className="press hero-warm relative w-full overflow-hidden rounded-hero p-5 text-start text-white"
-    >
-      {/* A four-point sparkle bled off the corner. It gives the card a focal
-          point without another element competing for the eye. */}
-      <span className="pointer-events-none absolute -end-6 -top-8 text-white/15">
-        <SparkleIcon size={150} filled />
-      </span>
-
-      <div className="relative flex items-start gap-2">
-        <span className="grid size-11 place-items-center rounded-field bg-white/20">
-          <BoltIcon size={21} filled />
-        </span>
-        {mode.is_featured && (
-          <span className="rounded-full bg-black/25 px-3 py-1.5 text-[12px] font-bold">
-            پرطرفدار
-          </span>
-        )}
-        <span className="flex-1" />
-        <span className="grid size-9 place-items-center rounded-full bg-white/20">
-          <ChevronIcon size={18} />
-        </span>
-      </div>
-
-      <p className="relative mt-5 text-[27px] font-extrabold leading-tight">
-        {mode.title}
-      </p>
-      <p className="relative text-[14px] leading-relaxed text-white/85">
-        {mode.subtitle}
-      </p>
-
-      {onlineCount > 0 && (
-        <p className="relative mt-3 flex items-center gap-2 text-[13px] font-bold">
-          <span className="flex" aria-hidden>
-            {["#2eff8e", "#32a9e3", "#ffcc0c"].map((colour, i) => (
-              <span
-                key={colour}
-                className="size-5 rounded-full border-2 border-white/40"
-                style={{ background: colour, marginInlineStart: i ? -8 : 0 }}
-              />
-            ))}
-          </span>
-          {faNum(onlineCount)} نفر الان آنلاین
-        </p>
-      )}
-    </button>
-  );
-}
-
-function ModeCard({
-  mode,
-  onPick,
-}: {
-  mode: MatchMode;
-  onPick: (mode: MatchMode) => void;
-}) {
-  const Icon = MODE_ICON[mode.key] ?? PersonIcon;
-  const tint = MODE_TINT[mode.key] ?? "var(--color-mode-group)";
-  const soldOut = mode.remaining_today === 0;
-
-  return (
-    <button
-      type="button"
-      disabled={soldOut}
-      onClick={() => onPick(mode)}
-      className="press surface-card relative flex min-h-[152px] w-full flex-col rounded-card p-4 text-start disabled:opacity-40"
-      style={{ ["--tint" as string]: tint }}
-    >
-      <div className="flex items-start">
-        <span className="tile-tint grid size-11 place-items-center rounded-field">
-          <Icon size={21} />
-        </span>
-        <span className="flex-1" />
-        {mode.remaining_today !== null && (
-          <span className="rounded-full bg-warn/15 px-2 py-0.5 text-[11px] font-bold text-warn">
-            {soldOut ? "تمام شد" : "محدود"}
-          </span>
-        )}
-      </div>
-
-      <p className="mt-auto pt-3 text-[16px] font-extrabold leading-tight">
-        {mode.title}
-      </p>
-      <p className="truncate text-[12.5px] text-muted">{mode.subtitle}</p>
-
-      <p className="mt-2 flex items-center gap-1.5 text-[11.5px] text-muted">
-        <span
-          className={`size-2 shrink-0 rounded-full ${QUEUE_DOT[mode.queue_state] ?? "bg-faint"}`}
-        />
-        {QUEUE_LABEL[mode.queue_state] ?? ""}
-      </p>
-    </button>
-  );
-}
-
-/** Join-by-code lives in the grid as a mode, because that is how it is used. */
-function FriendsCard({ onOpen }: { onOpen: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={onOpen}
-      className="press surface-card flex min-h-[152px] w-full flex-col rounded-card p-4 text-start"
-      style={{ ["--tint" as string]: "var(--color-mode-friends)" }}
-    >
-      <span className="tile-tint grid size-11 place-items-center rounded-field">
-        <KeyIcon size={21} />
-      </span>
-      <p className="mt-auto pt-3 text-[16px] font-extrabold leading-tight">
-        با دوستات
-      </p>
-      <p className="text-[12.5px] text-muted">با کد روم وارد شو</p>
-      <p className="mt-2 text-[11.5px] text-faint">یا خودت یکی بساز</p>
-    </button>
-  );
-}
-
-/**
- * Who is around right now. Real presence, from `last_seen_at` — an app that
- * looks busy when it is not gets found out on the first empty queue.
- */
-function ActiveNow({ people }: { people: Person[] }) {
+function ActiveNow({ people, onProfile }: { people: Person[]; onProfile: (p: Person) => void }) {
   return (
     <section>
-      <h2 className="mb-3 text-[17px] font-extrabold">فعال الان</h2>
+      <h2 className="mb-1 text-[17px] font-extrabold">بازیکن‌های آنلاین</h2>
+      <p className="mb-3 text-xs leading-6 text-muted">چند هم‌بازی تصادفی؛ روی پروفایل بزن و آشنا شو.</p>
+      {!people.length && <p className="surface-card rounded-card p-4 text-sm leading-7 text-muted">فعلاً بازیکن آنلاین دیگری پیدا نشد. کمی بعد دوباره سر بزن.</p>}
       <ul className="-mx-4 flex gap-3 overflow-x-auto px-4 pb-1">
         {people.map((person) => (
-          <li key={person.id} className="flex w-16 shrink-0 flex-col items-center gap-1">
+          <li key={person.id} className="w-20 shrink-0">
+            <button type="button" aria-label={`پروفایل ${person.display_name}`} onClick={() => onProfile(person)} className="press flex min-h-11 w-full flex-col items-center gap-2 rounded-card py-2">
             <span className="relative">
               <Avatar
-                avatarKey={person.avatar || "a1"}
+                photoUrl={person.avatar_url} avatarKey={person.avatar || "a1"}
                 name={person.display_name}
                 size={56}
                 glow
@@ -375,6 +221,7 @@ function ActiveNow({ people }: { people: Person[] }) {
             <span className="w-full truncate text-center text-[11px] text-muted">
               {person.display_name}
             </span>
+            </button>
           </li>
         ))}
       </ul>

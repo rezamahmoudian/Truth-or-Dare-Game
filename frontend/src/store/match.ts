@@ -1,10 +1,11 @@
 import { create } from "zustand";
 
 import * as api from "@/lib/matchApi";
-import type { MatchMode, MatchTicket, Person } from "@/lib/types";
+import type { AISettings, MatchMode, MatchTicket, Person } from "@/lib/types";
 import { socket } from "@/lib/ws";
 
 type MatchStore = {
+  aiSettings: AISettings | null;
   modes: MatchMode[];
   onlineCount: number;
   activePeople: Person[];
@@ -19,15 +20,17 @@ type MatchStore = {
   loadLobby: () => Promise<void>;
   loadModes: () => Promise<void>;
   resume: () => Promise<void>;
-  enqueue: (mode: string) => Promise<void>;
+  enqueue: (mode: string, aiConsent?: boolean) => Promise<void>;
   cancel: () => Promise<void>;
   clearMatch: () => void;
   dismissExpired: () => void;
 };
 
 let wired = false;
+let matchVersion = 0;
 
 export const useMatch = create<MatchStore>((set, get) => ({
+  aiSettings: null,
   modes: [],
   onlineCount: 0,
   activePeople: [],
@@ -49,6 +52,7 @@ export const useMatch = create<MatchStore>((set, get) => ({
           break;
 
         case "mm.matched":
+          matchVersion += 1;
           set({
             ticket: null,
             matchedConversationId: String(data.conversation_id),
@@ -81,6 +85,7 @@ export const useMatch = create<MatchStore>((set, get) => ({
     const lobby = await api.getLobby();
     set({
       modes: lobby.modes,
+      aiSettings: lobby.ai_settings ?? null,
       onlineCount: lobby.online_count,
       activePeople: lobby.active_people,
       loaded: true,
@@ -96,10 +101,13 @@ export const useMatch = create<MatchStore>((set, get) => ({
     set({ ticket: "id" in status && status.state === "QUEUED" ? status : null });
   },
 
-  async enqueue(mode) {
+  async enqueue(mode, aiConsent = false) {
     set({ error: null, expired: null });
-    const ticket = await api.enqueue(mode);
-    set({ ticket });
+    const startedVersion = matchVersion;
+    const ticket = await api.enqueue(mode, aiConsent);
+    if (ticket.state === "MATCHED" && ticket.conversation_id) {
+      set({ ticket: null, matchedConversationId: ticket.conversation_id });
+    } else if (startedVersion === matchVersion) set({ ticket });
   },
 
   async cancel() {

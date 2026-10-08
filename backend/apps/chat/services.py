@@ -222,6 +222,7 @@ def join_by_code(user: User, code: str) -> tuple[Conversation, bool]:
 
 @transaction.atomic
 def leave(user: User, conversation: Conversation) -> None:
+    conversation = Conversation.objects.select_for_update().get(pk=conversation.pk)
     participant = active_participant(user, conversation.id)
     participant.left_at = timezone.now()
     participant.save(update_fields=["left_at"])
@@ -290,6 +291,7 @@ def close_room(user: User, conversation: Conversation) -> Conversation:
     person rather than a side effect of everyone happening to leave. History
     stays readable afterwards; only new messages stop.
     """
+    conversation = Conversation.objects.select_for_update().get(pk=conversation.pk)
     if conversation.type != ConversationType.ROOM:
         raise DomainError("not_a_room", "این گفتگو روم نیست.", 400)
     if conversation.status == ConversationStatus.CLOSED:
@@ -371,11 +373,14 @@ def delete_for_me(user: User, conversation: Conversation) -> None:
 
 
 def _preview_for(message: Message) -> str:
+    if message.type == MessageType.ATTACHMENT:
+        return {"image": "📷 عکس", "video": "🎬 ویدئو", "voice": "🎤 پیام صوتی", "audio": "🎵 فایل صوتی"}.get(message.attachment_info.get("kind"), "📎 فایل")
     if message.type == MessageType.TEXT:
         return message.body[:120]
     return PREVIEW_LABELS.get(message.type, "")[:120]
 
 
+@transaction.atomic
 def post_message(
     *,
     conversation: Conversation,
@@ -385,6 +390,8 @@ def post_message(
     message_type: str = MessageType.TEXT,
     reply_to_id: int | None = None,
     meta: dict | None = None,
+    attachment_name: str = "",
+    attachment_info: dict | None = None,
 ) -> tuple[Message, bool]:
     """Append a message and fan it out. Returns (message, created).
 
@@ -393,8 +400,28 @@ def post_message(
     instead of raising lets the client reconcile its optimistic bubble either
     way.
     """
+    answer_turn = None
+    if sender is not None and message_type == MessageType.TEXT:
+        # Game transitions lock this same row. Resolve the turn on the server,
+        # so stale clients and simultaneous sends cannot answer twice.
+        conversation = Conversation.objects.select_for_update().get(pk=conversation.pk)
+        if client_id:
+            existing = Message.objects.filter(conversation=conversation, client_id=client_id).first()
+            if existing is not None:
+                if existing.sender_id != sender.pk:
+                    raise DomainError("invalid_client_id", "شناسهٔ پیام نامعتبر است.", 409)
+                return existing, False
+        from apps.game.models import Turn, TurnStatus, SessionStatus
+        candidate = Turn.objects.filter(
+            session__conversation=conversation, session__status=SessionStatus.ACTIVE,
+        ).select_related("session").order_by("-index").first()
+        if candidate and candidate.player_id == sender.pk and candidate.status == TurnStatus.ANSWERING:
+            answer_turn = candidate
     # A closed room keeps its history but takes no new lines. System messages
     # are exempt so the closing notice itself can be written.
+    if message_type != MessageType.SYSTEM:
+        from apps.ai_players.services import assert_session_open
+        assert_session_open(conversation.pk)
     if (
         conversation.status == ConversationStatus.CLOSED
         and message_type != MessageType.SYSTEM
@@ -438,6 +465,10 @@ def post_message(
     ).exists():
         raise DomainError("bad_reply", "پیام مرجع پیدا نشد.")
 
+    if answer_turn is not None:
+        message_type = MessageType.GAME_ANSWER
+        meta = {**(meta or {}), "turn_id": answer_turn.pk, "choice": answer_turn.choice}
+
     try:
         with transaction.atomic():
             message = Message.objects.create(
@@ -448,6 +479,8 @@ def post_message(
                 client_id=client_id or "",
                 reply_to_id=reply_to_id,
                 meta=meta or {},
+                attachment=attachment_name,
+                attachment_info=attachment_info or {},
             )
     except IntegrityError:
         existing = Message.objects.filter(
@@ -470,14 +503,18 @@ def post_message(
 
     recipients = participant_user_ids(conversation.id)
     payload = message_payload(message)
-    broadcast.to_users(recipients, "chat.message", payload)
+    transaction.on_commit(lambda: broadcast.to_users(recipients, "chat.message", payload))
+    if answer_turn is not None:
+        from apps.game.services import record_answer
+        record_answer(answer_turn, message)
     # A second, lighter event so a client showing only the chat list does not
     # have to keep every conversation's message state to reorder the list.
-    broadcast.to_users(
+    conversation_data = conversation_payload(conversation)
+    transaction.on_commit(lambda: broadcast.to_users(
         recipients,
         "conv.updated",
-        conversation_payload(conversation),
-    )
+        conversation_data,
+    ))
 
     logger.info(
         "chat.message_sent",
@@ -488,6 +525,9 @@ def post_message(
             "sender_id": sender.pk if sender else None,
         },
     )
+    if sender is not None and not sender.is_ai:
+        from apps.ai_players.services import notify
+        transaction.on_commit(lambda: notify(conversation.pk))
     return message, True
 
 

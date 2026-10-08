@@ -54,6 +54,8 @@ export class ApiError extends Error {
   get firstMessage(): string | null {
     if (typeof this.body === "string") return this.body;
     if (!this.body || typeof this.body !== "object") return null;
+    const detail = (this.body as Record<string, unknown>).detail;
+    if (typeof detail === "string") return detail;
     for (const value of Object.values(this.body as Record<string, unknown>)) {
       if (Array.isArray(value) && typeof value[0] === "string") return value[0];
       if (typeof value === "string") return value;
@@ -66,13 +68,14 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const response = await fetch(`/api${path}`, {
     ...init,
     headers: {
-      "Content-Type": "application/json",
+      ...(init.body instanceof FormData ? {} : { "Content-Type": "application/json" }),
       ...init.headers,
     },
   });
 
   const text = await response.text();
-  const body: unknown = text ? JSON.parse(text) : null;
+  let body: unknown = null;
+  try { body = text ? JSON.parse(text) : null; } catch { body = "پاسخ سرور نامعتبر است. دوباره تلاش کنید."; }
 
   if (!response.ok) throw new ApiError(response.status, body);
   return body as T;
@@ -124,11 +127,23 @@ export async function authFetch<T>(path: string, init: RequestInit = {}): Promis
   }
 }
 
+export async function authBlob(path: string, signal?: AbortSignal): Promise<Blob> {
+  const send = () => fetch(`/api${path}`, {
+    signal,
+    headers: { Authorization: `Bearer ${getAccessToken()}` },
+  });
+  let response = await send();
+  if (response.status === 401 && await refreshAccess()) response = await send();
+  if (!response.ok) throw new Error("دریافت فایل ممکن نشد. دوباره تلاش کنید.");
+  return response.blob();
+}
+
 export type Me = {
   id: number;
   username: string;
   display_name: string;
   avatar: string;
+  avatar_url?: string | null;
   bio: string;
   gender: "" | "F" | "M";
   birth_date: string | null;

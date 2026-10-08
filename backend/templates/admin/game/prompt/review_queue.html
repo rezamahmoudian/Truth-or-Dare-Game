@@ -1,0 +1,129 @@
+{% extends "admin/base_site.html" %}
+{% load i18n %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+  <a href="{% url 'admin:index' %}">پنل مدیریت</a> ›
+  <a href="{{ changelist_url }}">همهٔ سؤال‌ها</a> › بررسی سؤال‌ها
+</div>
+{% endblock %}
+
+{% block content %}
+<style>
+  .review-panel { direction: rtl; max-width: 1200px; color: #261a35; }
+  .review-panel * { box-sizing: border-box; }
+  .review-head { display: flex; justify-content: space-between; align-items: center; gap: 18px; margin-bottom: 18px; }
+  .review-head h1 { margin: 0 0 5px; font-size: 27px; font-weight: 800; color: #261a35; }
+  .review-head p { margin: 0; color: #695e75; }
+  .review-link { display: inline-block; padding: 10px 15px; border: 1px solid #d9cde3; border-radius: 10px; color: #582581 !important; background: #fff; text-decoration: none; white-space: nowrap; }
+  .review-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 18px; }
+  .review-stat { padding: 17px; border: 1px solid #e8dfed; border-radius: 14px; background: #fff; text-decoration: none; color: #261a35 !important; box-shadow: 0 6px 20px #3420420b; }
+  .review-stat.is-active { border-color: #b56ed5; box-shadow: 0 0 0 2px #efd8f7; }
+  .review-stat strong { display: block; margin-top: 5px; font-size: 25px; line-height: 1.2; }
+  .review-stat span { font-size: 13px; color: #695e75; }
+  .review-filters { display: flex; flex-wrap: wrap; align-items: end; gap: 10px; padding: 15px; border: 1px solid #e8dfed; border-radius: 14px; background: #fff; margin-bottom: 20px; }
+  .review-filters label { display: grid; gap: 5px; min-width: 125px; color: #5b5066; font-size: 12px; font-weight: 700; }
+  .review-filters label:first-child { flex: 1; min-width: 190px; }
+  .review-filters input, .review-filters select, .review-card input { width: 100%; min-height: 39px; padding: 8px 10px; border: 1px solid #d9cde3; border-radius: 9px; background: #fff; color: #261a35; font: inherit; }
+  .review-filters button, .review-action { min-height: 39px; padding: 8px 16px; border: 0; border-radius: 9px; color: #fff; background: #6d309b; font: inherit; font-weight: 700; cursor: pointer; }
+  .review-list { display: grid; gap: 14px; }
+  .review-card { padding: 19px; border: 1px solid #e8dfed; border-radius: 16px; background: #fff; box-shadow: 0 8px 24px #3420420d; }
+  .review-card-top { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .review-tags { display: flex; gap: 6px; flex-wrap: wrap; }
+  .review-tag { display: inline-block; padding: 4px 9px; border-radius: 100px; background: #f4eff8; color: #513b66; font-size: 12px; font-weight: 700; }
+  .review-tag.pending { background: #fff2d7; color: #8a5b06; }
+  .review-tag.approved { background: #dff7e9; color: #176443; }
+  .review-tag.rejected { background: #ffe6e9; color: #a32942; }
+  .review-prompt { margin: 16px 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 18px; line-height: 1.9; font-weight: 700; color: #261a35; }
+  .review-meta { display: flex; gap: 7px 18px; flex-wrap: wrap; color: #695e75; font-size: 12px; }
+  .review-note { margin-top: 13px; padding: 9px 11px; background: #fff6e7; border-radius: 8px; color: #70531d; font-size: 13px; }
+  .review-card form { display: flex; flex-wrap: wrap; align-items: end; gap: 9px; margin-top: 17px; padding-top: 14px; border-top: 1px solid #eee6f2; }
+  .review-card form label { flex: 1; min-width: 180px; display: grid; gap: 5px; color: #695e75; font-size: 12px; }
+  .review-action.approve { background: #147d57; }
+  .review-action.reject { background: #ad3050; }
+  .review-edit { align-self: center; color: #6d309b !important; font-weight: 700; text-decoration: none; }
+  .review-empty { padding: 36px 20px; border: 1px dashed #d9cde3; border-radius: 14px; text-align: center; background: #fff; color: #695e75; }
+  .review-pages { display: flex; justify-content: center; align-items: center; gap: 14px; margin-top: 20px; }
+  .review-pages a { color: #6d309b !important; font-weight: 700; }
+  @media (max-width: 700px) {
+    .review-head { display: block; }
+    .review-link { margin-top: 12px; }
+    .review-stats { grid-template-columns: repeat(2, 1fr); }
+    .review-card { padding: 15px; }
+    .review-card form label { flex-basis: 100%; }
+  }
+</style>
+
+<div class="review-panel">
+  <div class="review-head">
+    <div>
+      <h1>بررسی و تأیید سؤال‌ها</h1>
+      <p>سؤال‌های پیشنهادی و سؤال‌های اولیهٔ بازی را اینجا بررسی کنید. فقط سؤال تأییدشده وارد بازی می‌شود.</p>
+    </div>
+    <a class="review-link" href="{{ changelist_url }}">فهرست و ویرایش همهٔ سؤال‌ها</a>
+  </div>
+
+  <div class="review-stats">
+    <a class="review-stat {% if status == 'PENDING' %}is-active{% endif %}" href="?status=PENDING"><span>در انتظار بررسی</span><strong>{{ pending_count }}</strong></a>
+    <a class="review-stat {% if status == 'APPROVED' %}is-active{% endif %}" href="?status=APPROVED"><span>تأییدشده</span><strong>{{ approved_count }}</strong></a>
+    <a class="review-stat {% if status == 'REJECTED' %}is-active{% endif %}" href="?status=REJECTED"><span>ردشده</span><strong>{{ rejected_count }}</strong></a>
+    <a class="review-stat {% if status == 'ALL' %}is-active{% endif %}" href="?status=ALL"><span>همهٔ سؤال‌ها</span><strong>{{ total_count }}</strong></a>
+  </div>
+
+  <form class="review-filters" method="get">
+    <label>جستجو در متن یا نام کاربر<input type="search" name="q" value="{{ query }}" placeholder="مثلاً خاطره یا نام کاربر"></label>
+    <label>وضعیت<select name="status"><option value="ALL" {% if status == 'ALL' %}selected{% endif %}>همه</option>{% for value, label in status_choices %}<option value="{{ value }}" {% if status == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+    <label>منبع<select name="source"><option value="ALL" {% if source == 'ALL' %}selected{% endif %}>همه</option>{% for value, label in source_choices %}<option value="{{ value }}" {% if source == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+    <label>نوع<select name="type"><option value="ALL" {% if type == 'ALL' %}selected{% endif %}>همه</option>{% for value, label in type_choices %}<option value="{{ value }}" {% if type == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+    <label>دسته<select name="category"><option value="ALL" {% if category == 'ALL' %}selected{% endif %}>همه</option>{% for value, label in category_choices %}<option value="{{ value }}" {% if category == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+    <button type="submit">نمایش</button>
+  </form>
+
+  <div class="review-list">
+    {% for prompt in page %}
+      <article class="review-card">
+        <div class="review-card-top">
+          <div class="review-tags">
+            <span class="review-tag {% if prompt.review_status == 'PENDING' %}pending{% elif prompt.review_status == 'APPROVED' %}approved{% else %}rejected{% endif %}">{{ prompt.get_review_status_display }}</span>
+            <span class="review-tag">{{ prompt.get_source_display }}</span>
+            <span class="review-tag">{{ prompt.get_type_display }}</span>
+            <span class="review-tag">{{ prompt.get_category_display }}</span>
+            <span class="review-tag">شدت {{ prompt.intensity }}</span>
+          </div>
+          <span class="review-meta">#{{ prompt.pk }}</span>
+        </div>
+        <p class="review-prompt">{{ prompt.text }}</p>
+        <div class="review-meta">
+          <span>حداقل {{ prompt.min_players }} بازیکن</span>
+          <span>فرستنده: {% if prompt.submitted_by %}{{ prompt.submitted_by }}{% else %}بانک اولیهٔ بازی{% endif %}</span>
+          <span>ثبت: {{ prompt.created_at|date:"Y/m/d H:i" }}</span>
+          {% if prompt.reviewed_by %}<span>بررسی‌کننده: {{ prompt.reviewed_by }}</span>{% endif %}
+          {% if prompt.reviewed_at %}<span>بررسی: {{ prompt.reviewed_at|date:"Y/m/d H:i" }}</span>{% endif %}
+        </div>
+        {% if prompt.review_note %}<div class="review-note">یادداشت بررسی: {{ prompt.review_note }}</div>{% endif %}
+        <form method="post">
+          {% csrf_token %}
+          <input type="hidden" name="prompt_id" value="{{ prompt.pk }}">
+          {% if can_change %}
+            <label>دسته‌بندی سؤال<select name="prompt_category">{% for value, label in category_choices %}<option value="{{ value }}" {% if prompt.category == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+            <label>دلیل رد (اختیاری)<input type="text" name="review_note" maxlength="300" placeholder="یادداشت برای مدیر"></label>
+            {% if prompt.review_status != 'APPROVED' %}<button class="review-action approve" type="submit" name="decision" value="APPROVED">✓ تأیید و افزودن به بازی</button>{% endif %}
+            {% if prompt.review_status != 'REJECTED' %}<button class="review-action reject" type="submit" name="decision" value="REJECTED">رد سؤال</button>{% endif %}
+          {% endif %}
+          <a class="review-edit" href="{% url 'admin:game_prompt_change' prompt.pk %}">ویرایش متن و مشخصات</a>
+        </form>
+      </article>
+    {% empty %}
+      <div class="review-empty">سؤالی با این فیلترها پیدا نشد.</div>
+    {% endfor %}
+  </div>
+
+  {% if page.paginator.num_pages > 1 %}
+    <nav class="review-pages" aria-label="صفحه‌های سؤال‌ها">
+      {% if page.has_previous %}<a href="?status={{ status }}&amp;source={{ source }}&amp;type={{ type }}&amp;category={{ category }}&amp;q={{ query|urlencode }}&amp;page={{ page.previous_page_number }}">صفحهٔ قبل</a>{% endif %}
+      <span>صفحهٔ {{ page.number }} از {{ page.paginator.num_pages }}</span>
+      {% if page.has_next %}<a href="?status={{ status }}&amp;source={{ source }}&amp;type={{ type }}&amp;category={{ category }}&amp;q={{ query|urlencode }}&amp;page={{ page.next_page_number }}">صفحهٔ بعد</a>{% endif %}
+    </nav>
+  {% endif %}
+</div>
+{% endblock %}

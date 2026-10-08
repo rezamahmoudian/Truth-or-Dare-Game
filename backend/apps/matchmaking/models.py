@@ -44,6 +44,7 @@ class MatchMode(models.Model):
     # the queues that actually fill.
     is_featured = models.BooleanField(default=False)
     is_active = models.BooleanField(default=True)
+    is_ai = models.BooleanField("بازی با هوش مصنوعی", default=False)
     sort_order = models.PositiveSmallIntegerField(default=100)
 
     class Meta:
@@ -87,6 +88,8 @@ class MatchTicket(models.Model):
         max_length=10, choices=TicketState.choices, default=TicketState.QUEUED
     )
     widened = models.BooleanField(default=False)
+    ai_consent = models.BooleanField(default=False)
+    ai_fallback_at = models.DateTimeField(null=True, blank=True)
     conversation = models.ForeignKey(
         "chat.Conversation", on_delete=models.SET_NULL, null=True, blank=True
     )

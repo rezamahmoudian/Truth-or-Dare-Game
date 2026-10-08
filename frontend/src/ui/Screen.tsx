@@ -17,10 +17,10 @@ export function Screen({
   scroll?: boolean;
 }) {
   return (
-    <div className="flex h-[100dvh] flex-col">
+    <div className="app-shell flex h-[100dvh] flex-col">
       {header}
       <main
-        className={`flex-1 ${scroll ? "overflow-y-auto overscroll-contain" : "overflow-hidden"}`}
+        className={`min-h-0 flex-1 ${scroll ? "overflow-y-auto overscroll-contain" : "overflow-hidden"}`}
       >
         {children}
       </main>

@@ -31,10 +31,10 @@ export function ChatListScreen() {
         <EmptyState
           glyph="💬"
           title="هنوز گفتگویی نداری"
-          hint="از تب «بازی» یک روم بساز یا با کد وارد روم دوستت شو."
+          hint="از خانه یک بازی شروع کن یا با کد وارد روم دوستت شو."
         />
       ) : (
-        <ul className="mx-auto max-w-md divide-y divide-line-soft">
+        <ul className="surface-card mx-4 my-4 divide-y divide-line-soft overflow-hidden rounded-card">
           {conversations.map((conversation) => (
             <ConversationRow key={conversation.id} conversation={conversation} />
           ))}
@@ -45,9 +45,10 @@ export function ChatListScreen() {
 }
 
 function ConversationRow({ conversation }: { conversation: Conversation }) {
-  const other = conversation.participants[0];
+  const ai = conversation.participants.find((p) => p.is_ai);
+  const other = ai ?? conversation.participants[0];
   const title =
-    conversation.type === "ROOM"
+    ai ? ai.display_name : conversation.type === "ROOM"
       ? `روم ${conversation.code ?? ""}`
       : (other?.display_name ?? "گفتگو");
 
@@ -93,7 +94,7 @@ function ConversationRow({ conversation }: { conversation: Conversation }) {
         to={`/c/${conversation.id}`}
         className="flex min-w-0 flex-1 items-center gap-3 py-3 ps-4 transition-colors active:bg-surface"
       >
-        <Avatar avatarKey={other?.avatar || "a1"} name={title} size={50} glow />
+        <Avatar photoUrl={other?.avatar_url} avatarKey={other?.avatar || "a1"} name={title} size={50} glow />
 
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline gap-2">

@@ -18,7 +18,7 @@
 		Referrer-Policy "strict-origin-when-cross-origin"
 		# The app never embeds in a frame; nothing should embed it either.
 		X-Frame-Options "DENY"
-		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		Permissions-Policy "camera=(), microphone=(self), geolocation=()"
 		-Server
 	}
 

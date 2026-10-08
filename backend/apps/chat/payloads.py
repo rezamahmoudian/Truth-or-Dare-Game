@@ -21,6 +21,8 @@ def user_payload(user: User | None) -> dict | None:
         "username": user.username,
         "display_name": user.display_name,
         "avatar": user.avatar,
+        "avatar_url": user.avatar_url,
+        "is_ai": user.is_ai,
     }
 
 
@@ -36,6 +38,10 @@ def message_payload(message: Message) -> dict:
         "conversation_id": str(message.conversation_id),
         "type": message.type,
         "body": "" if message.is_deleted else message.body,
+        "attachment": (
+            {**message.attachment_info, "url": f"/conversations/{message.conversation_id}/messages/{message.pk}/attachment/"}
+            if message.attachment and not message.is_deleted else None
+        ),
         "sender": user_payload(message.sender),
         "reply_to_id": message.reply_to_id,
         "client_id": message.client_id,

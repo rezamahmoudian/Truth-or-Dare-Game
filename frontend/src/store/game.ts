@@ -6,6 +6,7 @@ import { socket } from "@/lib/ws";
 
 type GameStore = {
   byConversation: Record<string, GameState>;
+  choiceErrors: Record<number, string>;
   init: () => void;
   load: (conversationId: string) => Promise<void>;
   start: (conversationId: string, maxIntensity: number) => Promise<void>;
@@ -21,12 +22,20 @@ let wired = false;
 
 export const useGame = create<GameStore>((set, get) => ({
   byConversation: {},
+  choiceErrors: {},
 
   init() {
     if (wired) return;
     wired = true;
 
     socket.onEvent((type, data) => {
+      if (type === "error" && typeof data.client_id === "string" && data.client_id.startsWith("game-choice-")) {
+        const turnId = Number(data.client_id.slice("game-choice-".length));
+        if (Number.isInteger(turnId) && typeof data.message === "string") {
+          set((store) => ({ choiceErrors: { ...store.choiceErrors, [turnId]: data.message as string } }));
+        }
+        return;
+      }
       if (type !== "game.state") return;
       // A whole snapshot, so it simply replaces what was there. No ordering to
       // get right, nothing to reconcile, and a snapshot missed during a
@@ -73,7 +82,8 @@ export const useGame = create<GameStore>((set, get) => ({
   },
 
   choose(turnId, choice) {
-    socket.send("game.choose", { turn_id: turnId, choice });
+    set((store) => ({ choiceErrors: { ...store.choiceErrors, [turnId]: "" } }));
+    socket.send("game.choose", { turn_id: turnId, choice, client_id: `game-choice-${turnId}` });
   },
 
   answer(turnId, body) {

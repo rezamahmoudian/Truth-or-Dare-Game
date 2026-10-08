@@ -12,11 +12,16 @@ def person_payload(user: User, *, relation: str | None = None) -> dict:
         "username": user.username,
         "display_name": user.display_name,
         "avatar": user.avatar,
+        "avatar_url": user.avatar_url,
         "bio": user.bio,
         "gender": user.gender,
         "age": user.age,
+        "is_ai": user.is_ai,
         "last_seen_at": user.last_seen_at.isoformat() if user.last_seen_at else None,
     }
+    if user.is_ai and hasattr(user, "ai_persona"):
+        payload["ai_profile"] = user.ai_persona.public_profile()
+        payload["age"] = user.ai_persona.age
     if relation is not None:
         payload["relation"] = relation
     return payload

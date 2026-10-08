@@ -7,7 +7,7 @@ import { VitePWA } from "vite-plugin-pwa";
 
 // The same values the design and index.css use, so the splash screen and the
 // status bar match the first frame of the app instead of flashing a default.
-const THEME_COLOR = "#1a0a2d";
+const THEME_COLOR = "#15131f";
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
@@ -66,7 +66,7 @@ export default defineConfig(({ mode }) => {
         workbox: {
           // The shell — HTML, JS, CSS, the font, the icons — is precached so
           // the app opens instantly and opens at all on a bad connection.
-          globPatterns: ["**/*.{js,css,html,woff2,png,svg,ico}"],
+          globPatterns: ["**/*.{js,css,html,woff2,png,jpg,svg,ico}"],
           // Client-side routes resolve to the shell; the server's own paths
           // must never be answered from the cache as if they were a page.
           navigateFallback: "/index.html",

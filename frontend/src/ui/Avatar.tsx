@@ -1,10 +1,9 @@
+import { useState } from "react";
+
 export const AVATAR_KEYS = Array.from({ length: 12 }, (_, i) => `a${i + 1}`);
 
 /**
- * Preset avatars are drawn, not uploaded. Phase 1 has no image moderation, and
- * a product that matches strangers cannot safely accept arbitrary profile
- * photos before it can review them.
- *
+ * Preset colors provide a fallback when a profile photo is absent or unavailable.
  * Hues are spaced around the wheel but pulled away from the 50–80° band, where
  * a saturated fill turns muddy yellow-green and looks like a rendering fault
  * rather than a choice.
@@ -17,6 +16,7 @@ const HUES: Record<string, number> = Object.fromEntries(
 );
 
 type Props = {
+  photoUrl?: string | null;
   avatarKey: string;
   name?: string;
   size?: number;
@@ -26,12 +26,14 @@ type Props = {
 };
 
 export function Avatar({
+  photoUrl,
   avatarKey,
   name = "",
   size = 48,
   selected,
   glow = false,
 }: Props) {
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
   const hue = HUES[avatarKey] ?? 260;
   const initial = name.trim().charAt(0) || "؟";
 
@@ -53,7 +55,7 @@ export function Avatar({
       }}
       aria-hidden={!name}
     >
-      {initial}
+      {photoUrl && photoUrl !== failedUrl ? <img src={photoUrl} alt={name ? `عکس ${name}` : ""} className="h-full w-full rounded-full object-cover" onError={() => setFailedUrl(photoUrl)} /> : initial}
     </span>
   );
 }

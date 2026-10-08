@@ -32,7 +32,7 @@ export function WaitingOverlay({ ticket, title }: { ticket: MatchTicket; title: 
       className="animate-fade-in fixed inset-0 z-50 flex flex-col items-center justify-center gap-6 px-8 text-center"
       style={{
         background:
-          "radial-gradient(60rem 40rem at 50% 30%, #241d45 0%, transparent 60%), var(--color-ink)",
+          "radial-gradient(ellipse at 50% 30%, var(--lobby-glow, #edddff88), transparent 65%), var(--color-ink)",
       }}
     >
       <Pulse />

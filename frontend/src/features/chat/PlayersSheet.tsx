@@ -80,7 +80,7 @@ export function PlayersSheet({
               >
                 <span className="relative shrink-0">
                   <Avatar
-                    avatarKey={person.avatar || "a1"}
+                    photoUrl={person.avatar_url} avatarKey={person.avatar || "a1"}
                     name={person.display_name}
                     size={44}
                     glow
@@ -99,15 +99,19 @@ export function PlayersSheet({
                     @{person.username}
                     {full?.age != null && ` · ${faNum(full.age)} ساله`}
                   </p>
+                  {person.is_ai && <div className="mt-2 text-xs leading-6 text-muted">
+                    {full?.ai_profile && <p className="mt-1">{full.ai_profile.city} · {full.ai_profile.interests}</p>}
+                    {full?.bio && <p>{full.bio}</p>}
+                  </div>}
                 </div>
 
                 {!isSelf && (
                   <div className="flex shrink-0 items-center gap-1">
-                    <FriendButton
+                    {!person.is_ai && <FriendButton
                       userId={person.id}
                       relation={full?.relation}
                       compact
-                    />
+                    />}
                     <PersonMenu
                       userId={person.id}
                       displayName={person.display_name}

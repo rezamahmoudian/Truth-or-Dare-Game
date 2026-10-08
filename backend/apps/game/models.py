@@ -8,10 +8,22 @@ class PromptType(models.TextChoices):
 
 
 class Category(models.TextChoices):
-    FRIENDLY = "FRIENDLY", "دوستانه"
-    FUNNY = "FUNNY", "خنده‌دار"
+    # Keep stored keys stable for existing prompts, sessions and clients.
+    FRIENDLY = "FRIENDLY", "معمولی"
+    FUNNY = "FUNNY", "خصوصی"
     DEEP = "DEEP", "عمیق"
     BOLD = "BOLD", "جسورانه"
+
+
+class PromptSource(models.TextChoices):
+    SEED = "SEED", "پیش‌فرض"
+    USER = "USER", "پیشنهاد کاربر"
+
+
+class PromptReviewStatus(models.TextChoices):
+    PENDING = "PENDING", "در انتظار بررسی"
+    APPROVED = "APPROVED", "تأییدشده"
+    REJECTED = "REJECTED", "ردشده"
 
 
 class Prompt(models.Model):
@@ -36,10 +48,38 @@ class Prompt(models.Model):
     intensity = models.PositiveSmallIntegerField(default=1)
     min_players = models.PositiveSmallIntegerField(default=2)
     is_active = models.BooleanField(default=True)
+    source = models.CharField(
+        max_length=4, choices=PromptSource.choices, default=PromptSource.SEED, db_index=True
+    )
+    submitted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="prompt_suggestions",
+    )
+    review_status = models.CharField(
+        max_length=8,
+        choices=PromptReviewStatus.choices,
+        default=PromptReviewStatus.PENDING,
+        db_index=True,
+    )
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="reviewed_prompts",
+    )
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    review_note = models.CharField(max_length=300, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        indexes = [models.Index(fields=["type", "category", "intensity", "is_active"])]
+        indexes = [
+            models.Index(fields=["type", "category", "intensity", "is_active"]),
+            models.Index(fields=["review_status", "source", "created_at"]),
+        ]
 
     def __str__(self) -> str:
         return f"[{self.type}/{self.intensity}] {self.text[:50]}"

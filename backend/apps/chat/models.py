@@ -5,6 +5,8 @@ from django.conf import settings
 from django.db import models
 from django.db.models import Q
 
+from apps.chat.attachments import private_storage
+
 # Ambiguous glyphs removed: these codes get read aloud and retyped from a
 # screenshot, where O/0 and I/1 cost more than the lost entropy.
 CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
@@ -23,6 +25,7 @@ class ConversationStatus(models.TextChoices):
 
 
 class MessageType(models.TextChoices):
+    ATTACHMENT = "ATTACHMENT", "پیوست"
     TEXT = "TEXT", "متن"
     SYSTEM = "SYSTEM", "سیستمی"
     GAME_PROMPT = "GAME_PROMPT", "سؤال بازی"
@@ -148,6 +151,8 @@ class Message(models.Model):
         max_length=12, choices=MessageType.choices, default=MessageType.TEXT
     )
     body = models.TextField(max_length=2000, blank=True)
+    attachment = models.FileField(storage=private_storage, blank=True)
+    attachment_info = models.JSONField(default=dict, blank=True)
     reply_to = models.ForeignKey(
         "self", on_delete=models.SET_NULL, null=True, blank=True, related_name="replies"
     )

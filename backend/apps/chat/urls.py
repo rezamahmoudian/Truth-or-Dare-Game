@@ -5,6 +5,8 @@ from apps.chat import views
 app_name = "chat"
 
 urlpatterns = [
+    path("conversations/<uuid:conversation_id>/attachments/", views.AttachmentUploadView.as_view(), name="attachment-upload"),
+    path("conversations/<uuid:conversation_id>/messages/<int:message_id>/attachment/", views.AttachmentDownloadView.as_view(), name="attachment-download"),
     path("conversations/", views.ConversationListView.as_view(), name="list"),
     path("conversations/rooms/", views.RoomCreateView.as_view(), name="room-create"),
     path("conversations/join/", views.RoomJoinView.as_view(), name="room-join"),

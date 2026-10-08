@@ -1,7 +1,9 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
 import { PlayersSheet } from "@/features/chat/PlayersSheet";
+import { AttachmentView } from "@/features/chat/Attachments";
+import { AttachmentComposer } from "@/features/chat/AttachmentComposer";
 import { GamePanel } from "@/features/game/GamePanel";
 import { ReportSheet } from "@/features/moderation/ReportSheet";
 import * as api from "@/lib/chatApi";
@@ -36,7 +38,10 @@ export function ChatRoomScreen() {
   const navigate = useNavigate();
 
   const me = useSession((s) => s.user);
-  const messages = useChat((s) => s.messages[id]) ?? NO_MESSAGES;
+  const rawMessages = useChat((s) => s.messages[id]) ?? NO_MESSAGES;
+  const messages = useMemo(() => rawMessages.filter(
+    (message) => !(message.type === "SYSTEM" && message.meta?.ai_error),
+  ), [rawMessages]);
   const loading = useChat((s) => s.loadingHistory);
   const online = useChat((s) => s.online[id]) ?? NO_ONLINE;
   const typing = useChat((s) => s.typing[id]);
@@ -70,14 +75,16 @@ export function ChatRoomScreen() {
   const isClosed = conversation?.status === "CLOSED";
 
   const other = conversation?.participants.find((p) => p.id !== me?.id);
+  const ai = conversation?.participants.find((p) => p.is_ai);
   const title =
-    conversation?.type === "ROOM"
+    ai ? ai.display_name : conversation?.type === "ROOM"
       ? `روم ${conversation.code ?? ""}`
       : (other?.display_name ?? "گفتگو");
 
   const subtitle =
     status !== "open"
       ? "در حال اتصال…"
+      : ai ? (isClosed ? "گفتگو بسته شده" : "گفتگو و بازی")
       : typingIds.length > 0
         ? "در حال نوشتن…"
         : `${faNum(online.length)} نفر آنلاین`;
@@ -87,7 +94,7 @@ export function ChatRoomScreen() {
       scroll={false}
       header={
         <header
-          className="bar-blur flex shrink-0 items-center gap-1 border-b border-line-soft px-2 pb-2.5"
+          className="chat-header bar-blur flex shrink-0 items-center gap-1 border-b border-line-soft px-2 pb-2.5"
           style={{ paddingTop: "max(0.625rem, env(safe-area-inset-top))" }}
         >
           <button
@@ -107,7 +114,7 @@ export function ChatRoomScreen() {
             className="press flex min-w-0 flex-1 items-center gap-2.5 rounded-field py-1 text-start"
           >
             <Avatar
-              avatarKey={other?.avatar || "a1"}
+              photoUrl={other?.avatar_url} avatarKey={other?.avatar || "a1"}
               name={title}
               size={38}
               glow
@@ -317,7 +324,7 @@ function MessageList({
     <div
       ref={scrollRef}
       onScroll={onScroll}
-      className="h-full overflow-y-auto overscroll-contain px-3 py-4"
+      className="chat-message-list h-full overflow-y-auto overscroll-contain px-3 py-4"
     >
       <div className="mx-auto flex max-w-md flex-col">
         {messages.map((message, index) => {
@@ -449,7 +456,7 @@ function MessageRow({
 
   return (
     <div
-      className={`animate-rise flex gap-2 ${grouped ? "mt-0.5" : "mt-2.5"} ${
+      className={`chat-message-row animate-rise flex gap-2 ${grouped ? "mt-0.5" : "mt-2.5"} ${
         mine ? "flex-row-reverse" : ""
       }`}
     >
@@ -458,7 +465,7 @@ function MessageRow({
           <span className="w-8 shrink-0" aria-hidden />
         ) : (
           <Avatar
-            avatarKey={message.sender?.avatar || "a1"}
+            photoUrl={message.sender?.avatar_url} avatarKey={message.sender?.avatar || "a1"}
             name={message.sender?.display_name ?? ""}
             size={32}
           />
@@ -471,10 +478,13 @@ function MessageRow({
           </span>
         )}
 
+        {message.attachment && !message.is_deleted && <div className="chat-attachment surface-raised mb-1 w-full rounded-card p-3">
+          <AttachmentView attachment={message.attachment} />
+        </div>}
         <button
           type="button"
           onClick={() => setShowActions((open) => !open)}
-          className={`press whitespace-pre-wrap break-words px-3.5 py-2 text-start text-[15px] leading-relaxed ${
+          className={`chat-bubble press whitespace-pre-wrap break-words px-3.5 py-2 text-start text-[15px] leading-relaxed ${
             // The corner nearest the speaker stays tight while the rest are
             // round — the cheapest way to give a bubble a direction without
             // drawing a tail.
@@ -487,7 +497,7 @@ function MessageRow({
             message.is_deleted ? "italic opacity-50" : ""
           }`}
         >
-          {message.is_deleted ? "پیام حذف شد" : message.body}
+          {message.is_deleted ? "پیام حذف شد" : message.body || (message.attachment ? "گزینه‌های پیام ⋯" : "")}
         </button>
 
         <span
@@ -633,16 +643,10 @@ function Composer({ conversationId }: { conversationId: string }) {
 
   return (
     <div
-      className="bar-blur shrink-0 border-t border-line-soft px-3 py-2"
+      className="chat-composer-bar bar-blur shrink-0 border-t border-line-soft px-3 py-2"
       style={{ paddingBottom: "max(0.5rem, env(safe-area-inset-bottom))" }}
     >
-      <form
-        className="mx-auto flex max-w-md items-end gap-2"
-        onSubmit={(e) => {
-          e.preventDefault();
-          submit();
-        }}
-      >
+      <AttachmentComposer key={conversationId} conversationId={conversationId} hasText={!!text.trim()} onSendText={submit}>
         <textarea
           ref={areaRef}
           value={text}
@@ -654,18 +658,11 @@ function Composer({ conversationId }: { conversationId: string }) {
             }
           }}
           rows={1}
+          aria-label="متن پیام"
           placeholder="پیام…"
-          className="surface-raised max-h-32 min-h-12 flex-1 resize-none rounded-field px-4 py-3 text-[15px] outline-none transition-colors placeholder:text-faint focus:border-brand/60"
+          className="max-h-32 min-h-12 min-w-0 flex-1 resize-none rounded-[1.6rem] bg-transparent py-3 ps-1 pe-4 text-[14px] outline-none placeholder:text-faint focus-visible:ring-1 focus-visible:ring-brand/60"
         />
-        <button
-          type="submit"
-          disabled={!text.trim()}
-          className="press grid size-12 shrink-0 place-items-center rounded-field bg-gradient-to-b from-brand-soft to-brand text-white shadow-[0_6px_18px_-8px_var(--color-brand)] transition-opacity disabled:opacity-35 disabled:shadow-none"
-          aria-label="ارسال"
-        >
-          ➤
-        </button>
-      </form>
+      </AttachmentComposer>
     </div>
   );
 }

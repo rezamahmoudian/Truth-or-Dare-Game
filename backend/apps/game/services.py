@@ -40,6 +40,7 @@ from apps.core.errors import DomainError
 from apps.game.models import (
     GameSession,
     Prompt,
+    PromptReviewStatus,
     PromptType,
     SessionStatus,
     Turn,
@@ -121,6 +122,12 @@ def _require_turn(turn_id: int) -> Turn:
     )
     if turn is None:
         raise DomainError("turn_not_found", "نوبت پیدا نشد.", 404)
+    Conversation.objects.select_for_update().get(pk=turn.session.conversation_id)
+    from apps.ai_players.services import assert_session_open
+    assert_session_open(turn.session.conversation_id)
+    turn.refresh_from_db()
+    if not GameSession.objects.filter(pk=turn.session_id, status=SessionStatus.ACTIVE).exists():
+        raise DomainError("game_ended", "این بازی تمام شده است.", 409)
     return turn
 
 
@@ -172,6 +179,8 @@ def _publish(session: GameSession, turn: Turn | None) -> None:
         "game.state",
         payload,
     )
+    from apps.ai_players.services import notify
+    notify(session.conversation_id)
 
 
 def _publish_later(session: GameSession) -> None:
@@ -187,6 +196,7 @@ def _pick_prompt(session: GameSession, prompt_type: str) -> Prompt:
     queryset = Prompt.objects.filter(
         type=prompt_type,
         is_active=True,
+        review_status=PromptReviewStatus.APPROVED,
         intensity__lte=session.max_intensity,
         min_players__lte=len(session.turn_order),
     )
@@ -194,11 +204,18 @@ def _pick_prompt(session: GameSession, prompt_type: str) -> Prompt:
         queryset = queryset.filter(category=session.category)
 
     unused = queryset.exclude(pk__in=session.used_prompt_ids)
-    # Running out mid-game is normal in a long session with a small bank;
-    # recycling beats ending the game, and by then the repeats feel far apart.
-    prompt = unused.order_by("?").first() or queryset.order_by("?").first()
+    # Used IDs persist for the entire session, including skipped prompts.
+    # Exhaustion must never recycle a question already shown to these players.
+    prompt = unused.order_by("?").first()
 
     if prompt is None:
+        if queryset.exists():
+            label = "حقیقت" if prompt_type == PromptType.TRUTH else "جرئت"
+            raise DomainError(
+                "prompts_exhausted",
+                f"همهٔ سؤال‌های {label} با تنظیمات این بازی پرسیده شده‌اند. نوع دیگر را انتخاب کن یا بازی را پایان بده.",
+                409,
+            )
         raise DomainError("no_prompts", "سؤالی برای این تنظیمات پیدا نشد.", 503)
 
     if prompt.pk not in session.used_prompt_ids:
@@ -230,7 +247,12 @@ def start_game(
     them talk first and start when they want is the difference between a game
     and an interrogation.
     """
+    conversation = Conversation.objects.select_for_update().get(pk=conversation.pk)
+    from apps.ai_players.services import assert_session_open
+    assert_session_open(conversation.pk)
     chat_services.active_participant(user, conversation.id)
+    if conversation.status == "CLOSED":
+        raise DomainError("room_closed", "این روم بسته شده است.", 410)
 
     if not is_owner(user, conversation):
         raise DomainError(
@@ -341,6 +363,13 @@ def answer(user: User, turn_id: int, body: str) -> Turn:
         meta={"turn_id": turn.pk, "choice": turn.choice},
     )
 
+    record_answer(turn, message)
+    return turn
+
+
+def record_answer(turn: Turn, message) -> None:
+    """Called within the conversation lock and transaction by both send paths."""
+    session = turn.session
     turn.answer_message = message
     turn.status = TurnStatus.CONFIRMING
     turn.version += 1
@@ -352,7 +381,6 @@ def answer(user: User, turn_id: int, body: str) -> Turn:
     )
 
     transaction.on_commit(lambda: _publish(session, turn))
-    return turn
 
 
 @transaction.atomic
@@ -495,6 +523,7 @@ def end_game(session: GameSession, reason: str) -> None:
 
 @transaction.atomic
 def stop_game(user: User, conversation_id) -> None:
+    Conversation.objects.select_for_update().get(pk=conversation_id)
     participant = chat_services.active_participant(user, conversation_id)
     session = active_session(conversation_id)
     if session is None:

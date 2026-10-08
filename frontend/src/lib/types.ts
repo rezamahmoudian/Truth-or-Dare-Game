@@ -1,17 +1,28 @@
 export type PublicUser = {
+  is_ai?: boolean;
   id: number;
   username: string;
   display_name: string;
   avatar: string;
+  avatar_url?: string | null;
 };
 
-export type MessageType = "TEXT" | "SYSTEM" | "GAME_PROMPT" | "GAME_ANSWER";
+export type MessageType = "TEXT" | "SYSTEM" | "GAME_PROMPT" | "GAME_ANSWER" | "ATTACHMENT";
+
+export type Attachment = {
+  name: string;
+  size: number;
+  kind: "image" | "video" | "voice" | "audio" | "file";
+  mime: string;
+  url: string;
+};
 
 export type Message = {
   id: number;
   conversation_id: string;
   type: MessageType;
   body: string;
+  attachment?: Attachment | null;
   sender: PublicUser | null;
   reply_to_id: number | null;
   client_id: string;
@@ -40,10 +51,13 @@ export type Relation =
   | "BLOCKED";
 
 export type Person = {
+  is_ai?: boolean;
+  ai_profile?: { first_name: string; last_name: string; city: string; age: number; interests: string; disclosure: string };
   id: number;
   username: string;
   display_name: string;
   avatar: string;
+  avatar_url?: string | null;
   bio: string;
   gender: "" | "F" | "M";
   age: number | null;
@@ -64,7 +78,23 @@ export type FriendLists = {
   outgoing: FriendRequest[];
 };
 
+export type GameInvitation = {
+  id: number;
+  direction: "incoming" | "outgoing";
+  user: Person;
+  status: "PENDING" | "ACCEPTED" | "DECLINED" | "CANCELLED";
+  created_at: string;
+  conversation_id: string | null;
+};
+
+export type InvitationLists = {
+  incoming: GameInvitation[];
+  outgoing: GameInvitation[];
+  ready: GameInvitation[];
+};
+
 export type MatchMode = {
+  is_ai?: boolean;
   key: string;
   title: string;
   subtitle: string;
@@ -82,13 +112,21 @@ export type MatchMode = {
   queue_state: "FAST" | "SLOW" | "EMPTY";
 };
 
+export type AISettings = {
+  fallback_enabled: boolean;
+  session_min_minutes: number;
+  session_max_minutes: number;
+};
+
 export type Lobby = {
+  ai_settings: AISettings;
   modes: MatchMode[];
   online_count: number;
   active_people: Person[];
 };
 
 export type MatchTicket = {
+  ai_fallback_at?: string | null;
   id: number;
   mode: string;
   state: "QUEUED" | "MATCHED" | "CANCELLED" | "EXPIRED";
@@ -107,6 +145,17 @@ export type Prompt = {
   text: string;
   category: string;
   intensity: number;
+};
+
+export type PromptSuggestion = {
+  id: number;
+  text: string;
+  type: PromptChoice;
+  category: string;
+  intensity: number;
+  min_players: number;
+  review_status: "PENDING" | "APPROVED" | "REJECTED";
+  created_at: string;
 };
 
 export type TurnStatus =

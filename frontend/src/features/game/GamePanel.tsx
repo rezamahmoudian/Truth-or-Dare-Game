@@ -316,10 +316,12 @@ function Waiting({
 function ChooseRow({ turnId }: { turnId: number }) {
   const choose = useGame((s) => s.choose);
   const skip = useGame((s) => s.skip);
+  const error = useGame((s) => s.choiceErrors[turnId]);
 
   return (
     <div className="flex flex-col gap-2">
       <p className="text-center text-[14px] font-bold">نوبت توئه — انتخاب کن</p>
+      {error && <p role="alert" className="text-center text-[12px] leading-relaxed text-bad">{error}</p>}
       <div className="flex gap-2">
         <button
           type="button"
@@ -331,7 +333,7 @@ function ChooseRow({ turnId }: { turnId: number }) {
         <button
           type="button"
           onClick={() => choose(turnId, "DARE")}
-          className="press min-h-14 flex-1 rounded-field bg-gradient-to-b from-ok to-ok-deep text-[17px] font-extrabold text-ink shadow-[0_8px_22px_-10px_var(--color-ok)]"
+          className="press min-h-14 flex-1 rounded-field bg-gradient-to-b from-ok to-ok-deep text-[17px] font-extrabold text-white shadow-[0_8px_22px_-10px_var(--color-ok)]"
         >
           جرئت
         </button>
@@ -348,45 +350,18 @@ function ChooseRow({ turnId }: { turnId: number }) {
 }
 
 function AnswerRow({ turnId }: { turnId: number }) {
-  const answer = useGame((s) => s.answer);
   const skip = useGame((s) => s.skip);
-  const [text, setText] = useState("");
-
   return (
-    <form
-      className="flex flex-col gap-2"
-      onSubmit={(e) => {
-        e.preventDefault();
-        if (!text.trim()) return;
-        answer(turnId, text);
-        setText("");
-      }}
-    >
-      <p className="text-center text-[14px] font-bold">جوابت رو بنویس</p>
-      <div className="flex gap-2">
-        <input
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          autoFocus
-          placeholder="جواب…"
-          className="surface-raised min-h-12 flex-1 rounded-field px-4 text-[15px] outline-none placeholder:text-faint focus:border-brand/60"
-        />
-        <button
-          type="submit"
-          disabled={!text.trim()}
-          className="press min-h-12 shrink-0 rounded-field bg-gradient-to-b from-brand-soft to-brand px-5 font-bold text-white disabled:opacity-40 disabled:shadow-none"
-        >
-          ثبت
-        </button>
-      </div>
+    <div className="flex items-center justify-between gap-2">
+      <p className="text-[12px] text-muted">جوابت رو توی همین چت بفرست.</p>
       <button
         type="button"
         onClick={() => skip(turnId)}
-        className="py-1 text-[11.5px] text-faint"
+        className="min-h-11 shrink-0 rounded-field px-3 text-[12px] text-faint"
       >
-        نمی‌تونم — رد کن
+        رد کردن نوبت
       </button>
-    </form>
+    </div>
   );
 }
 
@@ -441,7 +416,7 @@ function ConfirmRow({
           type="button"
           disabled={alreadyConfirmed}
           onClick={() => confirm(turnId)}
-          className="press min-h-12 flex-1 rounded-field bg-gradient-to-b from-ok to-ok-deep text-[16px] font-extrabold text-ink shadow-[0_8px_22px_-10px_var(--color-ok)] disabled:opacity-50 disabled:shadow-none"
+          className="press min-h-12 flex-1 rounded-field bg-gradient-to-b from-ok to-ok-deep text-[16px] font-extrabold text-white shadow-[0_8px_22px_-10px_var(--color-ok)] disabled:opacity-50 disabled:shadow-none"
         >
           {alreadyConfirmed ? "تأیید کردی ✓" : "✓ آره، جواب داد"}
         </button>

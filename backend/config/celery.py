@@ -13,6 +13,10 @@ app.autodiscover_tasks()
 # of a gender queue priority. Two seconds is invisible to someone watching a
 # waiting screen and a twentieth of the work of a one-second tick.
 app.conf.beat_schedule = {
+    "ai-pending-work": {
+        "task": "apps.ai_players.tasks.recover_pending",
+        "schedule": 10.0,
+    },
     "matchmaking-tick": {
         "task": "apps.matchmaking.tasks.run_matcher",
         "schedule": 2.0,

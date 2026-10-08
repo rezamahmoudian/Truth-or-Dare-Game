@@ -25,9 +25,7 @@ class Gender(models.TextChoices):
     MALE = "M", "مرد"
 
 
-# Preset avatars rather than uploads. Phase 1 has no image moderation, and a
-# stranger-matching product with unmoderated profile photos is a liability the
-# moment it has users. Uploads can come later, behind the phase 6 tooling.
+# Preset avatars remain available when no profile photo has been uploaded.
 AVATAR_CHOICES = [(f"a{i}", f"آواتار {i}") for i in range(1, 13)]
 
 
@@ -44,7 +42,9 @@ class User(AbstractUser):
     # --- identity ---------------------------------------------------------
     display_name = models.CharField("نام نمایشی", max_length=32, blank=True)
     avatar = models.CharField(max_length=8, choices=AVATAR_CHOICES, blank=True)
+    profile_photo = models.CharField(max_length=100, blank=True, editable=False)
     bio = models.CharField(max_length=160, blank=True)
+    is_ai = models.BooleanField("شخصیت هوش مصنوعی", default=False, editable=False)
 
     # --- matchmaking attributes -------------------------------------------
     gender = models.CharField(max_length=1, choices=Gender.choices, blank=True)
@@ -77,6 +77,10 @@ class User(AbstractUser):
         return self.display_name or self.username
 
     # --- derived ----------------------------------------------------------
+
+    @property
+    def avatar_url(self):
+        return f"/api/profile-photos/{self.profile_photo}/" if self.profile_photo else None
 
     @property
     def age(self) -> int | None:
@@ -214,6 +218,31 @@ class FriendshipStatus(models.TextChoices):
     PENDING = "PENDING", "در انتظار"
     ACCEPTED = "ACCEPTED", "دوست"
     DECLINED = "DECLINED", "رد شده"
+
+
+class GameInvitation(models.Model):
+    class Status(models.TextChoices):
+        PENDING = "PENDING", "در انتظار"
+        ACCEPTED = "ACCEPTED", "پذیرفته‌شده"
+        DECLINED = "DECLINED", "رد شده"
+        CANCELLED = "CANCELLED", "لغو شده"
+
+    from_user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="game_invites_sent")
+    to_user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="game_invites_received")
+    status = models.CharField(max_length=10, choices=Status.choices, default=Status.PENDING)
+    conversation = models.ForeignKey("chat.Conversation", on_delete=models.SET_NULL, null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    responded_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(condition=~models.Q(from_user=models.F("to_user")), name="no_self_game_invite"),
+            models.UniqueConstraint(fields=["from_user", "to_user"], condition=models.Q(status="PENDING"), name="unique_pending_game_invite"),
+        ]
+        indexes = [models.Index(fields=["to_user", "status"])]
+
+    def __str__(self):
+        return f"{self.from_user_id} → {self.to_user_id} ({self.status})"
 
 
 class Friendship(models.Model):

@@ -32,6 +32,7 @@ from apps.users.models import Block, User
 logger = logging.getLogger("ft.match")
 
 LOCK_KEY = "mm:lock"
+AI_FALLBACK_SECONDS = 120
 
 
 # ---------------------------------------------------------------------------
@@ -60,10 +61,23 @@ def remaining_today(user: User, mode: MatchMode) -> int | None:
     return max(0, mode.daily_limit - used_today(user, mode))
 
 
-def enqueue(user: User, mode_key: str) -> MatchTicket:
+def enqueue(user: User, mode_key: str, *, ai_consent: bool = False) -> MatchTicket:
     mode = MatchMode.objects.filter(key=mode_key, is_active=True).first()
     if mode is None:
         raise DomainError("mode_not_found", "این حالت بازی موجود نیست.", 404)
+
+    if mode.is_ai:
+        if not ai_consent:
+            raise DomainError("ai_consent_required", "شروع بازی را تأیید کن.", 400)
+        from apps.ai_players.services import assert_available, eligible_personas
+        assert_available(user)
+        if mode.size_min != 2 or mode.size_max != 2:
+            raise DomainError("ai_mode_invalid", "این حالت از بازی باید دونفره باشد.", 409)
+        personas = eligible_personas(user)
+        if mode.target_gender:
+            personas = personas.filter(gender=mode.target_gender)
+        if not personas.exists():
+            raise DomainError("ai_no_persona", "فعلاً شخصیت فعالی برای بازی پیدا نشد.", 503)
 
     if not user.is_onboarded:
         raise DomainError("profile_incomplete", "اول پروفایلت رو کامل کن.", 409)
@@ -94,6 +108,10 @@ def enqueue(user: User, mode_key: str) -> MatchTicket:
             size_min=mode.size_min,
             size_max=mode.size_max,
             category=mode.category,
+            ai_consent=ai_consent,
+            ai_fallback_at=(timezone.now() + timedelta(seconds=AI_FALLBACK_SECONDS)
+                            if not mode.is_ai and mode.size_min == mode.size_max == 2
+                            and user.age is not None and user.age >= 18 and not user.is_ai else None),
         )
     except IntegrityError:
         # Two enqueues raced; the other one won.
@@ -110,8 +128,9 @@ def enqueue(user: User, mode_key: str) -> MatchTicket:
     return ticket
 
 
+@transaction.atomic
 def cancel(user: User, *, notify: bool = True) -> None:
-    ticket = active_ticket(user)
+    ticket = MatchTicket.objects.select_for_update().filter(user=user, state=TicketState.QUEUED).select_related("mode").first()
     if ticket is None:
         return
     ticket.state = TicketState.CANCELLED
@@ -147,8 +166,11 @@ def _queue_size(ticket: MatchTicket) -> int:
     Shown to the user because a silent waiting screen reads as broken; a number
     that moves reads as a queue.
     """
+    if ticket.mode.is_ai:
+        return 0
     return MatchTicket.objects.filter(
         state=TicketState.QUEUED,
+        mode__is_ai=False,
         size_min=ticket.size_min,
         size_max=ticket.size_max,
     ).count()
@@ -157,30 +179,34 @@ def _queue_size(ticket: MatchTicket) -> int:
 def queue_sizes() -> dict[tuple[int, int], int]:
     """How many people are waiting, grouped by the shape of room they want."""
     rows = (
-        MatchTicket.objects.filter(state=TicketState.QUEUED)
+        MatchTicket.objects.filter(state=TicketState.QUEUED, mode__is_ai=False)
         .values("size_min", "size_max")
         .annotate(total=Count("id"))
     )
     return {(row["size_min"], row["size_max"]): row["total"] for row in rows}
 
 
-def recently_active(limit: int = 12) -> list[User]:
-    """People seen in the last few minutes, for the lobby's presence row.
+def recently_active(viewer: User, limit: int = 12) -> list[User]:
+    """Random sample of people with a live app socket, excluding blocked pairs.
 
     Guests without a finished profile are skipped — a row of blank avatars
     makes the app look emptier than it is, not fuller.
     """
-    cutoff = timezone.now() - timedelta(minutes=settings.LOBBY_ACTIVE_MINUTES)
+    from apps.chat.presence import app_online_ids
     return list(
-        User.objects.filter(is_active=True, last_seen_at__gte=cutoff)
+        User.objects.filter(is_active=True, is_ai=False, pk__in=app_online_ids())
+        .exclude(pk=viewer.pk)
+        .exclude(pk__in=viewer.blocks_made.values_list("blocked_id", flat=True))
+        .exclude(pk__in=viewer.blocks_received.values_list("blocker_id", flat=True))
+        .exclude(gender="").filter(birth_date__isnull=False)
         .exclude(display_name="")
-        .order_by("-last_seen_at")[:limit]
+        .order_by("?")[:limit]
     )
 
 
 def online_count() -> int:
-    cutoff = timezone.now() - timedelta(minutes=settings.LOBBY_ACTIVE_MINUTES)
-    return User.objects.filter(is_active=True, last_seen_at__gte=cutoff).count()
+    from apps.chat.presence import app_online_ids
+    return User.objects.filter(is_active=True, is_ai=False, pk__in=app_online_ids()).count()
 
 
 def _notify(ticket: MatchTicket, event: str, extra: dict | None = None) -> None:
@@ -200,6 +226,8 @@ def _effective_category(ticket: MatchTicket) -> str:
 
 
 def _compatible(a: MatchTicket, b: MatchTicket) -> bool:
+    if a.mode.is_ai or b.mode.is_ai:
+        return False
     if (a.size_min, a.size_max) != (b.size_min, b.size_max):
         return False
 
@@ -279,21 +307,28 @@ def _match_once() -> dict:
     expired = _expire_stale(tickets)
     tickets = [t for t in tickets if t.state == TicketState.QUEUED]
 
+    from apps.ai_players.services import match_ticket
+    ai_matched = sum(match_ticket(t) for t in tickets if t.mode.is_ai)
+    tickets = [t for t in tickets if not t.mode.is_ai]
+
     widened = _widen_overdue(tickets)
 
-    groups = _form_groups(tickets)
-    for group in groups:
-        _commit_group(group)
+    groups = [group for group in _form_groups(tickets) if _commit_group(group) is not None]
 
     # Everyone still waiting gets a heartbeat so the screen keeps moving.
     matched_ids = {t.pk for group in groups for t in group}
     for ticket in tickets:
         if ticket.pk not in matched_ids:
-            _notify(ticket, "mm.searching")
+            if match_ticket(ticket):
+                ai_matched += 1
+            else:
+                ticket.refresh_from_db()
+                if ticket.state == TicketState.QUEUED:
+                    _notify(ticket, "mm.searching")
 
     return {
         "queued": len(tickets),
-        "matched": len(matched_ids),
+        "matched": len(matched_ids) + ai_matched,
         "groups": len(groups),
         "widened": widened,
         "expired": expired,
@@ -301,13 +336,20 @@ def _match_once() -> dict:
 
 
 def _expire_stale(tickets: list[MatchTicket]) -> int:
-    limit = settings.MATCH_TICKET_TTL_SECONDS
+    from apps.ai_players.models import AISettings
+    fallback_enabled = AISettings.load().fallback_enabled
     count = 0
     for ticket in tickets:
+        limit = settings.MATCH_TICKET_TTL_SECONDS
+        if fallback_enabled and ticket.ai_fallback_at:
+            limit = max(limit, int((ticket.ai_fallback_at - ticket.created_at).total_seconds()) + 120)
         if _waited(ticket) < limit:
             continue
+        changed = MatchTicket.objects.filter(pk=ticket.pk, state=TicketState.QUEUED).update(state=TicketState.EXPIRED)
+        if not changed:
+            ticket.refresh_from_db()
+            continue
         ticket.state = TicketState.EXPIRED
-        ticket.save(update_fields=["state"])
         # Naming a concrete alternative beats an apology: the group queue is
         # the one that always fills.
         _notify(ticket, "mm.expired", {"suggested_mode": "group"})
@@ -391,7 +433,10 @@ def _form_groups(tickets: list[MatchTicket]) -> list[list[MatchTicket]]:
 
 
 @transaction.atomic
-def _commit_group(group: list[MatchTicket]) -> Conversation:
+def _commit_group(group: list[MatchTicket]) -> Conversation | None:
+    locked = list(MatchTicket.objects.select_for_update().filter(pk__in=[t.pk for t in group]).order_by("pk"))
+    if len(locked) != len(group) or any(t.state != TicketState.QUEUED for t in locked):
+        return None
     mode = group[0].mode
 
     conversation = Conversation.objects.create(

@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 
 import { UpgradeAccountCard } from "@/features/profile/UpgradeAccountCard";
+import { ProfilePhotoEditor } from "@/features/profile/ProfilePhotoEditor";
+import { PromptSuggestionCard } from "@/features/profile/PromptSuggestionCard";
 import { faNum } from "@/lib/dates";
 import * as api from "@/lib/moderationApi";
 import type { Person } from "@/lib/types";
@@ -16,8 +18,8 @@ export function ProfileScreen() {
   return (
     <Screen header={<Header title="پروفایل" />} footer={<TabBar />}>
       <div className="mx-auto flex max-w-md flex-col gap-4 px-4 py-5">
-        <section className="surface-card flex items-center gap-4 rounded-card p-5">
-          <Avatar avatarKey={user.avatar || "a1"} name={user.display_name} size={64} glow />
+        <section className="profile-card flex items-center gap-4 rounded-card p-5">
+          <Avatar photoUrl={user.avatar_url} avatarKey={user.avatar || "a1"} name={user.display_name} size={64} glow />
           <div className="min-w-0">
             <p className="truncate text-[19px] font-extrabold">{user.display_name}</p>
             <p className="truncate text-[13px] text-muted">@{user.username}</p>
@@ -28,7 +30,10 @@ export function ProfileScreen() {
           </div>
         </section>
 
+        <ProfilePhotoEditor />
         {user.is_guest && <UpgradeAccountCard />}
+
+        <PromptSuggestionCard />
 
         <BlockedList />
       </div>
@@ -73,7 +78,7 @@ function BlockedList() {
               className="flex items-center gap-3 border-b border-line-soft py-2 last:border-b-0"
             >
               <Avatar
-                avatarKey={person.avatar || "a1"}
+                photoUrl={person.avatar_url} avatarKey={person.avatar || "a1"}
                 name={person.display_name}
                 size={36}
               />

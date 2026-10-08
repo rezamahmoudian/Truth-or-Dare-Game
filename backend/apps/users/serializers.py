@@ -36,14 +36,16 @@ class PublicUserSerializer(serializers.ModelSerializer):
     """
 
     age = serializers.IntegerField(read_only=True)
+    avatar_url = serializers.ReadOnlyField()
 
     class Meta:
         model = User
-        fields = ("id", "username", "display_name", "avatar", "bio", "gender", "age")
+        fields = ("id", "username", "display_name", "avatar", "avatar_url", "bio", "gender", "age")
         read_only_fields = fields
 
 
 class MeSerializer(serializers.ModelSerializer):
+    avatar_url = serializers.ReadOnlyField()
     age = serializers.IntegerField(read_only=True)
     is_onboarded = serializers.BooleanField(read_only=True)
     can_change_gender = serializers.BooleanField(read_only=True)
@@ -55,6 +57,7 @@ class MeSerializer(serializers.ModelSerializer):
             "username",
             "display_name",
             "avatar",
+            "avatar_url",
             "bio",
             "gender",
             "birth_date",

@@ -3,6 +3,15 @@ import type { Conversation, Message } from "@/lib/types";
 
 export const listConversations = () => authFetch<Conversation[]>("/conversations/");
 
+export const uploadAttachment = (id: string, file: File, voice: boolean, clientId: string, body: string) => {
+  const data = new FormData();
+  data.append("file", file);
+  data.append("voice", String(voice));
+  data.append("client_id", clientId);
+  data.append("body", body);
+  return authFetch<Message>(`/conversations/${id}/attachments/`, { method: "POST", body: data });
+};
+
 export const getConversation = (id: string) =>
   authFetch<Conversation>(`/conversations/${id}/`);
 

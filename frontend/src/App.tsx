@@ -7,6 +7,8 @@ import { FriendsScreen } from "@/features/friends/FriendsScreen";
 import { OfflineBar, UpdateToast } from "@/features/pwa/PwaChrome";
 import { Onboarding } from "@/features/onboarding/Onboarding";
 import { PlayScreen } from "@/features/play/PlayScreen";
+import { GameInviteNotice, GameInvitationsScreen } from "@/features/play/GameInvitations";
+import { useInvitations } from "@/store/invitations";
 import { ProfileScreen } from "@/features/profile/ProfileScreen";
 import { useChat } from "@/store/chat";
 import { useGame } from "@/store/game";
@@ -26,6 +28,8 @@ export default function App() {
   const initGame = useGame((s) => s.init);
   const initMatch = useMatch((s) => s.init);
   const initSocial = useSocial((s) => s.init);
+  const initInvitations = useInvitations((s) => s.init);
+  const loadInvitations = useInvitations((s) => s.load);
   const loadFriends = useSocial((s) => s.load);
   const loadConversations = useChat((s) => s.loadConversations);
 
@@ -41,6 +45,8 @@ export default function App() {
     initGame();
     initMatch();
     initSocial();
+    initInvitations();
+    void loadInvitations().catch(() => undefined);
     void loadConversations();
     void loadFriends();
   }, [
@@ -50,6 +56,8 @@ export default function App() {
     initGame,
     initMatch,
     initSocial,
+    initInvitations,
+    loadInvitations,
     loadConversations,
     loadFriends,
   ]);
@@ -63,6 +71,7 @@ export default function App() {
       <OfflineBar />
       <UpdateToast />
       <RoutedScreens />
+      <GameInviteNotice />
     </BrowserRouter>
   );
 }
@@ -78,6 +87,7 @@ function RoutedScreens() {
     <ErrorBoundary resetKey={location.pathname}>
       <Routes>
         <Route path="/" element={<PlayScreen />} />
+        <Route path="/invitations" element={<GameInvitationsScreen />} />
         <Route path="/chats" element={<ChatListScreen />} />
         <Route path="/c/:id" element={<ChatRoomScreen />} />
         <Route path="/friends" element={<FriendsScreen />} />

@@ -11,6 +11,7 @@ venv/
 .ruff_cache/
 backend/staticfiles/
 backend/media/
+backend/private_media/
 backend/celerybeat-schedule*
 *.sqlite3
 

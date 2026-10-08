@@ -54,6 +54,7 @@ class AppConsumer(AsyncJsonWebsocketConsumer):
 
         await self.accept(accepted)
         await self.channel_layer.group_add(f"user.{self.user.pk}", self.channel_name)
+        await database_sync_to_async(presence.mark_app_online)(self.user.pk, self.channel_name)
 
         await self.send_json({"type": "ready", "data": {"user_id": self.user.pk}})
         logger.info("ws.connected", extra={"event": "ws.connected", "user_id": self.user.pk})
@@ -67,6 +68,7 @@ class AppConsumer(AsyncJsonWebsocketConsumer):
             await self._unsubscribe(conversation_id)
 
         await self.channel_layer.group_discard(f"user.{user.pk}", self.channel_name)
+        await database_sync_to_async(presence.mark_app_offline)(user.pk, self.channel_name)
 
     # -- inbound ----------------------------------------------------------
 
@@ -122,6 +124,7 @@ class AppConsumer(AsyncJsonWebsocketConsumer):
         return self._window_count <= RATE_MAX_ACTIONS
 
     async def _heartbeat(self) -> None:
+        await database_sync_to_async(presence.mark_app_online)(self.user.pk, self.channel_name)
         # Refreshes presence for every open conversation; a client that stops
         # pinging ages out of the online set without needing a clean close.
         for conversation_id in getattr(self, "subscribed", ()):

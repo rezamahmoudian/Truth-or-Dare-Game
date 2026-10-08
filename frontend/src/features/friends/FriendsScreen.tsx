@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { FriendButton } from "@/features/friends/FriendButton";
@@ -82,7 +82,7 @@ function PersonRow({
       {...(onOpen ? { type: "button" as const, onClick: onOpen } : {})}
       className="press flex w-full items-center gap-3 border-b border-line-soft px-4 py-3 text-start last:border-b-0"
     >
-      <Avatar avatarKey={person.avatar || "a1"} name={person.display_name} size={44} glow />
+      <Avatar photoUrl={person.avatar_url} avatarKey={person.avatar || "a1"} name={person.display_name} size={44} glow />
       <div className="min-w-0 flex-1">
         <p className="truncate text-[15px] font-semibold">{person.display_name}</p>
         <p className="truncate text-xs text-muted">
@@ -97,18 +97,22 @@ function PersonRow({
 
 function RequestRow({ request }: { request: FriendRequest }) {
   const decline = useSocial((s) => s.decline);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
 
   return (
     <PersonRow person={request.user}>
-      <div className="flex shrink-0 gap-1">
+      <div className="flex shrink-0 flex-col gap-1">
         <FriendButton userId={request.user.id} relation="INCOMING" compact />
         <button
           type="button"
-          onClick={() => void decline(request.user.id)}
-          className="press min-h-9 rounded-field bg-surface-2 px-3 text-[12px] text-muted"
+          disabled={busy}
+          onClick={async () => { setBusy(true); setError(""); try { await decline(request.user.id); } catch { setError("انجام نشد؛ دوباره تلاش کن."); } finally { setBusy(false); } }}
+          className="press min-h-11 rounded-field bg-surface-2 px-3 text-[12px] text-muted disabled:opacity-40"
         >
           رد
         </button>
+        {error && <span role="alert" className="text-xs text-bad">{error}</span>}
       </div>
     </PersonRow>
   );

@@ -3,6 +3,7 @@ import { NavLink } from "react-router-dom";
 import { faNum } from "@/lib/dates";
 import { useChat } from "@/store/chat";
 import { useSocial } from "@/store/social";
+import { useInvitations } from "@/store/invitations";
 import { ChatIcon, FriendsIcon, HomeIcon, PersonIcon } from "@/ui/icons";
 
 const TABS = [
@@ -21,15 +22,16 @@ export function TabBar() {
     s.conversations.reduce((sum, c) => sum + c.unread_count, 0),
   );
   const requests = useSocial((s) => s.lists.incoming.length);
+  const invitations = useInvitations((s) => s.lists.incoming.length + s.lists.ready.length);
 
   return (
     <nav
-      className="shrink-0 border-t border-line-soft bg-ink-deep"
+      className="app-tabbar shrink-0"
       style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
     >
-      <ul className="mx-auto flex max-w-md">
+      <ul className="mx-auto flex max-w-md gap-1 rounded-[24px] border border-line bg-surface p-1.5">
         {TABS.map(({ to, label, Icon, end }) => {
-          const badge = to === "/chats" ? unread : to === "/friends" ? requests : 0;
+          const badge = to === "/chats" ? unread : to === "/friends" ? requests : to === "/" ? invitations : 0;
 
           return (
             <li key={to} className="flex-1">
@@ -37,8 +39,8 @@ export function TabBar() {
                 to={to}
                 end={end}
                 className={({ isActive }) =>
-                  `flex h-[64px] w-full flex-col items-center justify-center gap-1 text-[11px] transition-colors ${
-                    isActive ? "font-bold text-brand" : "text-faint"
+                  `flex h-[56px] w-full flex-col items-center justify-center gap-1 rounded-[18px] text-[11px] transition-colors ${
+                    isActive ? "bg-brand/10 font-bold text-brand" : "text-muted"
                   }`
                 }
               >

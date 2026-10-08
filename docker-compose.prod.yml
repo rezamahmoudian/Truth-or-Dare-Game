@@ -39,6 +39,7 @@ services:
     # container's own disk, where Caddy could never see it.
     volumes: !override
       - staticfiles:/app/staticfiles
+      - private_media:/app/private_media
     restart: unless-stopped
 
   worker:
@@ -80,5 +81,6 @@ services:
         condition: service_completed_successfully
 
 volumes:
+  private_media:
   frontend_dist:
   staticfiles:
