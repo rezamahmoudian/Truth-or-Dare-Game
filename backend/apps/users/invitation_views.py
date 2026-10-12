@@ -26,5 +26,5 @@ class InvitationRespondView(APIView):
     throttle_scope = "profile"
 
     def post(self, request, invitation_id, action):
-        row = invitations.respond(request.user, invitation_id, action)
+        row = invitations.respond(request.user, invitation_id, action, conversation_id=request.data.get("conversation_id"))
         return Response(invitations.payload(row, request.user.pk))

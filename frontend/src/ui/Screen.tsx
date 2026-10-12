@@ -10,14 +10,16 @@ export function Screen({
   footer,
   children,
   scroll = true,
+  className = "",
 }: {
   header?: ReactNode;
   footer?: ReactNode;
   children: ReactNode;
   scroll?: boolean;
+  className?: string;
 }) {
   return (
-    <div className="app-shell flex h-[100dvh] flex-col">
+    <div className={`app-shell flex h-[100dvh] flex-col ${className}`}>
       {header}
       <main
         className={`min-h-0 flex-1 ${scroll ? "overflow-y-auto overscroll-contain" : "overflow-hidden"}`}

@@ -41,6 +41,7 @@ export function clearTokens(): void {
 }
 
 export const getAccessToken = () => read(ACCESS_KEY);
+export const hasSessionTokens = () => !!(read(ACCESS_KEY) || read(REFRESH_KEY));
 
 export class ApiError extends Error {
   constructor(
@@ -99,9 +100,12 @@ async function refreshAccess(): Promise<boolean> {
       write(ACCESS_KEY, data.access);
       if (data.refresh) write(REFRESH_KEY, data.refresh);
       return true;
-    } catch {
-      clearTokens();
-      return false;
+    } catch (error) {
+      if (error instanceof ApiError && (error.status === 401 || error.status === 400)) {
+        clearTokens();
+        return false;
+      }
+      throw error;
     } finally {
       refreshInFlight = null;
     }
@@ -145,6 +149,8 @@ export type Me = {
   avatar: string;
   avatar_url?: string | null;
   bio: string;
+  city?: string;
+  interests?: string[];
   gender: "" | "F" | "M";
   birth_date: string | null;
   age: number | null;
@@ -171,3 +177,19 @@ export const fetchMe = () => authFetch<Me>("/users/me/");
 
 export const patchMe = (patch: Partial<Me>) =>
   authFetch<Me>("/users/me/", { method: "PATCH", body: JSON.stringify(patch) });
+
+export async function signIn(username: string, password: string): Promise<Me> {
+  const data = await request<Tokens & { user: Me }>("/auth/login/", {
+    method: "POST", body: JSON.stringify({ username: username.trim(), password }),
+  });
+  setTokens(data);
+  return data.user;
+}
+
+export async function registerAccount(username: string, password: string, passwordConfirm: string): Promise<Me> {
+  const data = await request<Tokens & { user: Me }>("/auth/register/", {
+    method: "POST", body: JSON.stringify({ username: username.trim(), password, password_confirm: passwordConfirm }),
+  });
+  setTokens(data);
+  return data.user;
+}

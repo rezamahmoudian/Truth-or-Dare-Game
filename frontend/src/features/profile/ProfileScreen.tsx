@@ -1,6 +1,9 @@
 import { useEffect, useState } from "react";
 
 import { UpgradeAccountCard } from "@/features/profile/UpgradeAccountCard";
+import { Link } from "react-router-dom";
+import { AccountSwitch } from "./AccountSwitch";
+import { ProfileDetailsEditor } from "./ProfileDetailsEditor";
 import { ProfilePhotoEditor } from "@/features/profile/ProfilePhotoEditor";
 import { PromptSuggestionCard } from "@/features/profile/PromptSuggestionCard";
 import { faNum } from "@/lib/dates";
@@ -19,7 +22,7 @@ export function ProfileScreen() {
     <Screen header={<Header title="پروفایل" />} footer={<TabBar />}>
       <div className="mx-auto flex max-w-md flex-col gap-4 px-4 py-5">
         <section className="profile-card flex items-center gap-4 rounded-card p-5">
-          <Avatar photoUrl={user.avatar_url} avatarKey={user.avatar || "a1"} name={user.display_name} size={64} glow />
+          <Link to={`/people/${user.id}`} aria-label="نمایش پروفایل من"><Avatar photoUrl={user.avatar_url} avatarKey={user.avatar || "a1"} name={user.display_name} size={64} glow /></Link>
           <div className="min-w-0">
             <p className="truncate text-[19px] font-extrabold">{user.display_name}</p>
             <p className="truncate text-[13px] text-muted">@{user.username}</p>
@@ -31,11 +34,13 @@ export function ProfileScreen() {
         </section>
 
         <ProfilePhotoEditor />
+        <ProfileDetailsEditor />
         {user.is_guest && <UpgradeAccountCard />}
 
         <PromptSuggestionCard />
 
         <BlockedList />
+        <AccountSwitch />
       </div>
     </Screen>
   );

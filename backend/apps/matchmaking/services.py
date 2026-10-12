@@ -51,7 +51,7 @@ def active_ticket(user: User) -> MatchTicket | None:
 def used_today(user: User, mode: MatchMode) -> int:
     since = timezone.now() - timedelta(hours=24)
     return MatchTicket.objects.filter(
-        user=user, mode=mode, created_at__gte=since
+        user=user, mode=mode, quota_consumed_at__gte=since
     ).count()
 
 
@@ -84,12 +84,6 @@ def enqueue(user: User, mode_key: str, *, ai_consent: bool = False) -> MatchTick
     if user.age is not None and user.age < mode.min_age:
         raise DomainError("too_young", "این حالت برای سن شما نیست.", 403)
 
-    remaining = remaining_today(user, mode)
-    if remaining == 0:
-        raise DomainError(
-            "daily_limit", "سهمیه امروز این حالت تمام شده است.", 429
-        )
-
     existing = active_ticket(user)
     if existing:
         # Re-enqueueing the same mode is what a reconnecting client does; it is
@@ -97,6 +91,12 @@ def enqueue(user: User, mode_key: str, *, ai_consent: bool = False) -> MatchTick
         # twice.
         if existing.mode_id == mode.pk:
             return existing
+
+    if remaining_today(user, mode) == 0:
+        raise DomainError(
+            "daily_limit", "سهمیه امروز این حالت تمام شده است.", 429
+        )
+    if existing:
         cancel(user, notify=False)
 
     try:
@@ -140,14 +140,17 @@ def cancel(user: User, *, notify: bool = True) -> None:
         _notify(ticket, "mm.cancelled")
 
 
-def status(user: User) -> dict | None:
-    ticket = active_ticket(user)
+def status(user: User, *, ticket_id: int | None = None) -> dict | None:
+    # Recover the exact pending search when a match event was missed. Never
+    # return an arbitrary old match, and never expose another user's ticket.
+    ticket = (MatchTicket.objects.filter(pk=ticket_id, user=user).select_related("mode").first()
+              if ticket_id is not None else active_ticket(user))
     if ticket is None:
         return None
     return ticket_payload(
         ticket,
         waited=_waited(ticket),
-        queue_size=_queue_size(ticket),
+        queue_size=_queue_size(ticket) if ticket.state == TicketState.QUEUED else 0,
     )
 
 
@@ -299,7 +302,7 @@ def _match_once() -> dict:
     tickets = list(
         MatchTicket.objects.filter(state=TicketState.QUEUED)
         .select_related("mode", "user")
-        .order_by("created_at")
+        .order_by("created_at", "pk")
     )
     if not tickets:
         return {"queued": 0}
@@ -408,6 +411,23 @@ def _form_groups(tickets: list[MatchTicket]) -> list[list[MatchTicket]]:
     used: set[int] = set()
     groups: list[list[MatchTicket]] = []
 
+    # Serve explicit two-player gender requests before unrestricted matches.
+    # Keep the original gender preference even after widening: a suitable
+    # arrival should go to that queue first. Remaining tickets can still use
+    # the usual relaxed matching rules below.
+    by_age = sorted(tickets, key=lambda t: (t.created_at, t.pk))
+    for seed in by_age:
+        if seed.pk in used or seed.mode.is_ai or not seed.want_gender or (seed.size_min, seed.size_max) != (2, 2):
+            continue
+        candidate = next((
+            ticket for ticket in by_age
+            if ticket.pk != seed.pk and ticket.pk not in used
+            and ticket.my_gender == seed.want_gender and allowed(seed, ticket)
+        ), None)
+        if candidate is not None:
+            used.update((seed.pk, candidate.pk))
+            groups.append([seed, candidate])
+
     for index, seed in enumerate(ordered):
         if seed.pk in used:
             continue
@@ -439,24 +459,30 @@ def _commit_group(group: list[MatchTicket]) -> Conversation | None:
         return None
     mode = group[0].mode
 
-    conversation = Conversation.objects.create(
-        type=ConversationType.ROOM,
-        status=ConversationStatus.ACTIVE,
-        code=Conversation.generate_code(),
-        max_players=mode.size_max,
-        # The longest-waiting player owns the room, so a matched room has a
-        # close button belonging to someone from the moment it exists.
-        # (group[0] is the seed of the grouping pass, which priority ordering
-        # may have put first for being the scarce side — not for waiting
-        # longest.)
-        owner_id=min(group, key=lambda t: t.created_at).user_id,
-    )
-    Participant.objects.bulk_create(
-        Participant(conversation=conversation, user_id=t.user_id) for t in group
-    )
+    if len(group) == 2 and mode.size_max == 2:
+        players = sorted(group, key=lambda t: t.created_at)
+        conversation = chat_services.get_or_create_pair(players[0].user, players[1].user, room=True)
+    else:
+        conversation = Conversation.objects.create(
+            type=ConversationType.ROOM,
+            status=ConversationStatus.ACTIVE,
+            code=Conversation.generate_code(),
+            max_players=mode.size_max,
+            # The longest-waiting player owns the room, so a matched room has a
+            # close button belonging to someone from the moment it exists.
+            # (group[0] is the seed of the grouping pass, which priority ordering
+            # may have put first for being the scarce side — not for waiting
+            # longest.)
+            owner_id=min(group, key=lambda t: t.created_at).user_id,
+        )
+        Participant.objects.bulk_create(
+            Participant(conversation=conversation, user_id=t.user_id) for t in group
+        )
 
+    from apps.matchmaking.quota import close_pending
+    close_pending(conversation.pk)
     MatchTicket.objects.filter(pk__in=[t.pk for t in group]).update(
-        state=TicketState.MATCHED, conversation=conversation
+        state=TicketState.MATCHED, conversation=conversation, matched_at=timezone.now()
     )
 
     names = "، ".join(t.user.display_name or t.user.username for t in group)

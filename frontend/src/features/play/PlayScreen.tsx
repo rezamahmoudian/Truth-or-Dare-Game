@@ -2,7 +2,6 @@ import { HeroCard, ModeCard, FriendsCard } from "@/features/play/ModeCards";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { GameInvitationsLink } from "@/features/play/GameInvitations";
-import { PersonProfileSheet } from "@/features/play/PersonProfileSheet";
 
 import { WaitingOverlay } from "@/features/play/WaitingOverlay";
 import { AIIntroSheet } from "@/features/play/AIIntroSheet";
@@ -50,7 +49,6 @@ export function PlayScreen() {
   const [error, setError] = useState<string | null>(null);
   const [showCode, setShowCode] = useState(false);
   const [aiMode, setAIMode] = useState<MatchMode | null>(null);
-  const [selectedPerson, setSelectedPerson] = useState<Person | null>(null);
 
   useEffect(() => {
     void loadLobby().catch(() => undefined);
@@ -89,7 +87,6 @@ export function PlayScreen() {
   return (
     <Screen header={<LobbyHeader streak={me?.streak_days ?? 0} />} footer={<TabBar />}>
       {ticket && <WaitingOverlay ticket={ticket} title={waitingTitle} />}
-      {selectedPerson && <PersonProfileSheet key={selectedPerson.id} person={selectedPerson} onClose={() => { setSelectedPerson(null); void loadLobby().catch(() => undefined); }} />}
       {aiMode && <AIIntroSheet onClose={() => setAIMode(null)} onStart={async () => {
         await enqueue(aiMode.key, true); setAIMode(null);
       }} />}
@@ -144,7 +141,7 @@ export function PlayScreen() {
           </p>
         )}
 
-        <ActiveNow people={activePeople} onProfile={setSelectedPerson} />
+        <ActiveNow people={activePeople} onProfile={person => navigate(`/people/${person.id}`)} />
 
         <InstallBanner />
 

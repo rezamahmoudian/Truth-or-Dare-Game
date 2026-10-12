@@ -88,11 +88,11 @@ const os = require("node:os");
     console.log("PASS hold + release sends once");
 
     const p = await hold();
-    await page.mouse.move(p.x + 105, p.y);
+    await page.mouse.move(p.x - 105, p.y);
     await page.getByText("رها کن تا لغو شود").waitFor();
     await page.mouse.up();
     await uploadsCount(1);
-    console.log("PASS slide right cancels");
+    console.log("PASS slide left cancels");
 
     const lock = await hold();
     await page.mouse.move(lock.x, lock.y - 100);

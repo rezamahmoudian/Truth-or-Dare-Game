@@ -8,7 +8,6 @@ import { useInvitations } from "@/store/invitations";
 import { Avatar } from "@/ui/Avatar";
 import { Header, Screen } from "@/ui/Screen";
 import { TabBar } from "@/ui/TabBar";
-import { PersonProfileSheet } from "@/features/play/PersonProfileSheet";
 
 export function GameInvitationsScreen() {
   const navigate = useNavigate();
@@ -19,7 +18,6 @@ export function GameInvitationsScreen() {
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<"incoming" | "ready" | "outgoing">("incoming");
   const [visible, setVisible] = useState(15);
-  const [person, setPerson] = useState<Person | null>(null);
   useEffect(() => {
     dismiss();
     void load().catch(() => setError("دریافت دعوت‌ها ممکن نشد.")).finally(() => setLoading(false));
@@ -35,10 +33,9 @@ export function GameInvitationsScreen() {
       {error && <button type="button" className="min-h-11 text-sm text-bad" onClick={() => { void load().then(() => setError("")).catch(() => setError("دریافت دعوت‌ها ممکن نشد.")); }}>{error} تلاش دوباره</button>}
       {loading && <p role="status" className="py-6 text-center text-sm text-muted">در حال دریافت دعوت‌ها…</p>}
       {!loading && !error && !rows.length && <div className="surface-card rounded-card px-4 py-10 text-center"><span className="text-3xl" aria-hidden>🎲</span><p className="mt-3 text-sm text-muted">{tab === 'incoming' ? 'دعوت جدیدی نداری.' : tab === 'ready' ? 'هنوز دعوت پذیرفته‌شده‌ای برای بازی نداری.' : 'دعوتی در انتظار پاسخ نداری.'}</p></div>}
-      {rows.length > 0 && <section aria-label="فهرست دعوت‌ها" className="surface-card rounded-card px-4">{rows.slice(0, visible).map((row) => <InvitationRow key={row.id} row={row} onProfile={setPerson} />)}</section>}
+      {rows.length > 0 && <section aria-label="فهرست دعوت‌ها" className="surface-card rounded-card px-4">{rows.slice(0, visible).map((row) => <InvitationRow key={row.id} row={row} onProfile={person => navigate(`/people/${person.id}`)} />)}</section>}
       {rows.length > visible && <button type="button" className="mt-3 min-h-11 w-full rounded-field bg-surface-2 text-sm text-brand-soft" onClick={() => setVisible((n) => n + 15)}>نمایش بیشتر</button>}
     </div>
-    {person && <PersonProfileSheet key={person.id} person={person} onClose={() => setPerson(null)} />}
   </Screen>;
 }
 

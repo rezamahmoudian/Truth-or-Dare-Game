@@ -59,6 +59,11 @@ export type Person = {
   avatar: string;
   avatar_url?: string | null;
   bio: string;
+  city?: string;
+  interests?: string[];
+  joined_at?: string;
+  stats?: { games: number; truths: number; dares: number; streak_days: number };
+  badges?: { key: string; title: string; description: string; icon: string; earned: boolean; progress: number; target: number }[];
   gender: "" | "F" | "M";
   age: number | null;
   last_seen_at: string | null;
@@ -180,6 +185,7 @@ export type Turn = {
 };
 
 export type GameSession = {
+  play_mode?: "CLASSIC" | "DEEP_TALK";
   id: number;
   conversation_id: string;
   status: "ACTIVE" | "ENDED";

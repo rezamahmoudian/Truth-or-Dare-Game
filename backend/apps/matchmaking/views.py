@@ -1,4 +1,4 @@
-from rest_framework import status
+from rest_framework import serializers, status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -62,8 +62,15 @@ class MatchView(APIView):
     permission_classes = [IsAuthenticated]
     throttle_scope = "match"
 
+    def get_throttles(self):
+        # Status recovery must not consume the quota for joining/leaving.
+        self.throttle_scope = "match_status" if self.request.method == "GET" else "match"
+        return super().get_throttles()
+
     def get(self, request) -> Response:
-        return Response(services.status(request.user) or {"state": "IDLE"})
+        raw_id = request.query_params.get("ticket_id")
+        ticket_id = serializers.IntegerField(min_value=1).run_validation(raw_id) if raw_id is not None else None
+        return Response(services.status(request.user, ticket_id=ticket_id) or {"state": "IDLE"})
 
     def post(self, request) -> Response:
         mode_key = str(request.data.get("mode") or "")

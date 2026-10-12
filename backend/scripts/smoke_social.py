@@ -159,26 +159,21 @@ async def main():
     _, lists_a = http("GET", "/friends/", a.token)
     check("and as an outgoing one for the sender", len(lists_a["outgoing"]) == 1)
 
-    # --- acceptance opens a private conversation ----------------------------
+    # --- acceptance only updates friendship; opening chat is explicit --------
     status, accepted = http("POST", f"/friends/{a.id}/accept/", b.token)
-    conversation_id = accepted.get("conversation_id") if accepted else None
-    check("accepting works", status == 200 and bool(conversation_id))
-
-    conversation = await db(lambda: Conversation.objects.get(pk=conversation_id))
-    check("acceptance opens a DIRECT conversation", conversation.type == "DIRECT",
-          conversation.type)
-
+    check("accepting adds a friend without creating a chat",
+          status == 200 and accepted.get("conversation_id") is None)
     both = await wait_for(
         lambda: a.event("friend.accepted") and b.event("friend.accepted")
     )
-    check("both sides are told, with the conversation id",
-          bool(both) and a.event("friend.accepted")["conversation_id"] == conversation_id)
-
-    messages = await db(
-        lambda: list(Message.objects.filter(conversation_id=conversation_id))
-    )
-    check("the private chat does not open empty", len(messages) >= 1,
-          messages[0].body if messages else "no messages")
+    check("both sides are told about the friendship", bool(both))
+    status, opened = http("POST", f"/friends/{a.id}/conversation/", b.token)
+    conversation_id = opened.get("conversation_id")
+    check("message action opens a conversation", status == 200 and bool(conversation_id))
+    conversation = await db(lambda: Conversation.objects.get(pk=conversation_id))
+    check("new friends without history get one DIRECT chat", conversation.type == "DIRECT")
+    _, reopened = http("POST", f"/friends/{b.id}/conversation/", a.token)
+    check("the other friend opens the same chat", reopened.get("conversation_id") == conversation_id)
 
     _, lists = http("GET", "/friends/", a.token)
     check("they appear in each other's friend list",

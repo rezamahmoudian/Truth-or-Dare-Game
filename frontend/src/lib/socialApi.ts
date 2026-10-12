@@ -10,7 +10,7 @@ export const sendFriendRequest = (userId: number) =>
   authFetch<Person>(`/friends/${userId}/`, { method: "POST" });
 
 export const acceptFriend = (userId: number) =>
-  authFetch<{ conversation_id: string; user: Person }>(
+  authFetch<{ conversation_id: string | null; user: Person }>(
     `/friends/${userId}/accept/`,
     { method: "POST" },
   );
@@ -21,3 +21,6 @@ export const declineFriend = (userId: number) =>
 /** Cancels a sent request or removes a friend — the server knows which. */
 export const removeFriend = (userId: number) =>
   authFetch<null>(`/friends/${userId}/`, { method: "DELETE" });
+
+export const openFriendConversation = (userId: number) =>
+  authFetch<{ conversation_id: string }>(`/friends/${userId}/conversation/`, { method: "POST" });

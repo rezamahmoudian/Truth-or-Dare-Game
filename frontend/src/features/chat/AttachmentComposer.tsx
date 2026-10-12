@@ -5,6 +5,8 @@ import { useVoiceRecorder } from "./useVoiceRecorder";
 import { ApiError } from "@/lib/auth";
 import { uploadAttachment } from "@/lib/chatApi";
 import { useChat } from "@/store/chat";
+import { ChatIcon } from "./ChatDecor";
+import { EmojiPicker } from "./EmojiPicker";
 
 type Draft = { file: File; voice: boolean; id: string; url: string };
 type IconName = "mic" | "clip" | "send" | "lock" | "trash" | "stop" | "image" | "video" | "file";
@@ -25,12 +27,15 @@ function Icon({ name }: { name: IconName }) {
 
 const action = "grid size-12 shrink-0 place-items-center rounded-full transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-brand disabled:opacity-40";
 
-export function AttachmentComposer({ conversationId, children, hasText, onSendText }: {
+export function AttachmentComposer({ conversationId, children, hasText, onSendText, onInsertEmoji }: {
   conversationId: string; children: ReactNode; hasText: boolean; onSendText: () => void;
+  onInsertEmoji?: (emoji: string) => void;
 }) {
   const [draft, setDraft] = useState<Draft | null>(null);
   const [busy, setBusy] = useState(false);
   const [menu, setMenu] = useState(false);
+  const [emojiMenu, setEmojiMenu] = useState(false);
+  const sectionRef = useRef<HTMLElement>(null);
   const [locked, setLocked] = useState(false);
   const [cancelReady, setCancelReady] = useState(false);
   const [error, setError] = useState("");
@@ -42,11 +47,21 @@ export function AttachmentComposer({ conversationId, children, hasText, onSendTe
   const keyboard = useRef(false);
   const helpId = useId();
   const menuId = useId();
+  const emojiMenuId = useId();
   const voice = useVoiceRecorder((file, sendNow) => {
     const next = select(file, true);
     if (next && sendNow) void send(next);
   });
   const active = voice.phase !== "idle";
+
+  useEffect(() => {
+    if (!menu && !emojiMenu) return;
+    const outside = (e: PointerEvent) => { if (!sectionRef.current?.contains(e.target as Node)) { setMenu(false); setEmojiMenu(false); } };
+    const escape = (e: KeyboardEvent) => { if (e.key === "Escape") { setMenu(false); setEmojiMenu(false); } };
+    document.addEventListener("pointerdown", outside);
+    document.addEventListener("keydown", escape);
+    return () => { document.removeEventListener("pointerdown", outside); document.removeEventListener("keydown", escape); };
+  }, [menu, emojiMenu]);
 
   useEffect(() => {
     mounted.current = true;
@@ -69,6 +84,7 @@ export function AttachmentComposer({ conversationId, children, hasText, onSendTe
     }
     clearDraft();
     setMenu(false);
+    setEmojiMenu(false);
     setError("");
     draftUrl.current = URL.createObjectURL(file);
     const next = { file, voice: isVoice, id: crypto.randomUUID?.() ?? `f-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`, url: draftUrl.current };
@@ -96,6 +112,7 @@ export function AttachmentComposer({ conversationId, children, hasText, onSendTe
   function begin(lock = false) {
     if (active || draft || uploading.current) return;
     setMenu(false);
+    setEmojiMenu(false);
     setError("");
     setLocked(lock);
     setCancelReady(false);
@@ -112,11 +129,12 @@ export function AttachmentComposer({ conversationId, children, hasText, onSendTe
 
   const kind = draft?.voice ? "voice" : draft?.file.type.startsWith("image/") && draft.file.type !== "image/svg+xml" ? "image" : draft?.file.type.startsWith("video/") ? "video" : draft?.file.type.startsWith("audio/") ? "audio" : "file";
   const time = `${Math.floor(voice.seconds / 60)}:${String(voice.seconds % 60).padStart(2, "0")}`;
-  return <section className="chat-composer relative mx-auto flex max-w-md flex-col gap-2" aria-label="ارسال پیام و پیوست">
+  return <section ref={sectionRef} className="chat-composer relative mx-auto flex max-w-md flex-col gap-2" aria-label="ارسال پیام و پیوست">
     <input ref={input} type="file" className="hidden" aria-label="انتخاب فایل" onChange={(e) => { const file = e.target.files?.[0]; if (file) select(file); e.target.value = ""; }} />
-    {menu && <div id={menuId} className="animate-rise surface-raised flex gap-2 rounded-card p-2" aria-label="انتخاب پیوست">
+    {menu && <div id={menuId} className="composer-popover composer-attachments animate-rise surface-raised flex gap-2 rounded-card p-2" aria-label="انتخاب پیوست">
       {([["عکس", "image/*", "image"], ["ویدئو", "video/*", "video"], ["فایل", "", "file"]] as const).map(([label, accept, icon]) => <button key={label} type="button" className="press flex min-h-16 flex-1 flex-col items-center justify-center gap-1 rounded-field bg-surface-2 text-[12px] text-muted hover:bg-surface-3" onClick={() => { if (input.current) { input.current.accept = accept; input.current.click(); } }}><Icon name={icon} />{label}</button>)}
     </div>}
+    {emojiMenu && <EmojiPicker id={emojiMenuId} onSelect={emoji => { onInsertEmoji?.(emoji); setEmojiMenu(false); }} />}
     {draft && <div className="animate-rise surface-raised flex max-h-[40dvh] flex-col gap-3 overflow-y-auto rounded-card p-3">
       <div className="flex items-center gap-2 text-[12px]">
         <span className="text-brand-soft"><Icon name={draft.voice ? "mic" : "file"} /></span>
@@ -135,15 +153,16 @@ export function AttachmentComposer({ conversationId, children, hasText, onSendTe
           <span className={`size-2 shrink-0 rounded-full bg-bad ${voice.phase === "recording" ? "motion-safe:animate-pulse" : ""}`} aria-hidden="true" />
           <span className="text-[13px] tabular-nums text-muted" dir="ltr" aria-label="زمان ضبط">{time}</span>
           <span className={`min-w-0 flex-1 text-center text-[11px] ${cancelReady ? "text-bad" : "text-faint"}`} role="status">
-            {voice.phase === "requesting" ? "مجوز میکروفون را فعال کنید…" : voice.phase === "finishing" ? "آماده‌سازی وویس…" : locked ? "ضبط بدون نگه‌داشتن" : cancelReady ? "رها کن تا لغو شود" : "برای لغو به راست بکش →"}
+            {voice.phase === "requesting" ? "مجوز میکروفون را فعال کنید…" : voice.phase === "finishing" ? "آماده‌سازی وویس…" : locked ? "ضبط بدون نگه‌داشتن" : cancelReady ? "رها کن تا لغو شود" : "← برای لغو به چپ بکش"}
           </span>
           {locked && voice.phase === "recording" && <button type="button" className={`${action} text-muted`} onClick={() => voice.finish("preview")} aria-label="توقف و گوش‌دادن قبل از ارسال"><Icon name="stop" /></button>}
         </div> : <>
-          <button type="button" className={`${action} text-faint hover:text-brand-soft`} aria-label={menu ? "بستن پیوست‌ها" : "افزودن پیوست"} aria-expanded={menu} aria-controls={menuId} disabled={busy || !!draft} onClick={() => setMenu((open) => !open)}><Icon name="clip" /></button>
+          <button type="button" className={`${action} text-faint hover:text-brand-soft`} aria-label={menu ? "بستن پیوست‌ها" : "افزودن پیوست"} aria-expanded={menu} aria-controls={menuId} disabled={busy || !!draft} onClick={() => { setMenu((open) => !open); setEmojiMenu(false); }}><Icon name="clip" /></button>
           {children}
+      {onInsertEmoji && <button type="button" className={`${action} composer-smile`} disabled={busy || !!draft} aria-label="انتخاب ایموجی" aria-expanded={emojiMenu} aria-controls={emojiMenuId} onClick={() => { setEmojiMenu(v => !v); setMenu(false); }}><ChatIcon name="smile" /></button>}
         </>}
       </div>
-      {hasText && !active ? <button type="button" onClick={onSendText} className={`${action} bg-gradient-to-b from-brand-soft to-brand text-white`} aria-label="ارسال پیام"><Icon name="send" /></button> : <div className="relative shrink-0">
+      {hasText && !active ? <button type="button" onPointerDown={(e) => e.preventDefault()} onClick={onSendText} className={`${action} bg-gradient-to-b from-brand-soft to-brand text-white`} aria-label="ارسال پیام"><Icon name="send" /></button> : <div className="relative shrink-0">
         {active && !locked && <div className="pointer-events-none absolute bottom-full start-0 mb-4 flex w-12 flex-col items-center gap-2 rounded-full border border-line bg-surface py-3 text-brand-soft shadow-lg" aria-hidden="true"><Icon name="lock" /><span className="text-sm">↑</span></div>}
         <button type="button"
           aria-label={locked && active ? "ارسال وویس" : "برای ضبط وویس نگه دارید"} aria-describedby={helpId}
@@ -163,7 +182,7 @@ export function AttachmentComposer({ conversationId, children, hasText, onSendTe
           onPointerMove={(e) => {
             const held = gesture.current;
             if (!held || held.id !== e.pointerId) return;
-            held.cancel = e.clientX - held.x > 80;
+            held.cancel = held.x - e.clientX > 80;
             setCancelReady(held.cancel);
             if (!held.cancel && held.y - e.clientY > 70 && voice.phase === "recording") {
               gesture.current = null;
@@ -194,7 +213,7 @@ export function AttachmentComposer({ conversationId, children, hasText, onSendTe
         ><Icon name={locked && active ? "send" : cancelReady ? "trash" : "mic"} /></button>
       </div>}
     </div>
-    <div className="flex min-h-5 items-center justify-center text-[11px] text-faint" id={helpId}>
+    <div className={active ? "flex min-h-5 items-center justify-center text-[11px] text-faint" : "sr-only"} id={helpId}>
       {active && locked ? <button type="button" className="min-h-11 px-5 text-[12px] text-bad" onClick={() => voice.finish("cancel")}>حذف وویس</button> : active ? "رها کن برای ارسال · به بالا بکش برای قفل ضبط" : "برای وویس نگه دار؛ برای ارسال رها کن"}
     </div>
     {(error || voice.error) && <p className="text-center text-[12px] text-bad" role="alert">{error || voice.error}</p>}

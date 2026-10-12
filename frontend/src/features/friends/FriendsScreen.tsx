@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 
 import { FriendButton } from "@/features/friends/FriendButton";
 import { faNum } from "@/lib/dates";
 import type { FriendRequest, Person } from "@/lib/types";
-import { useChat } from "@/store/chat";
+import { openFriendConversation } from "@/lib/socialApi";
+import { ApiError } from "@/lib/auth";
 import { useSocial } from "@/store/social";
 import { Avatar } from "@/ui/Avatar";
 import { EmptyState, Header, Screen } from "@/ui/Screen";
@@ -69,19 +70,16 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 function PersonRow({
   person,
-  onOpen,
   children,
 }: {
   person: Person;
-  onOpen?: () => void;
   children: React.ReactNode;
 }) {
-  const Wrapper = onOpen ? "button" : "div";
   return (
-    <Wrapper
-      {...(onOpen ? { type: "button" as const, onClick: onOpen } : {})}
+    <div
       className="press flex w-full items-center gap-3 border-b border-line-soft px-4 py-3 text-start last:border-b-0"
     >
+      <Link to={`/people/${person.id}`} aria-label={`پروفایل ${person.display_name}`} className="flex min-w-0 flex-1 items-center gap-3">
       <Avatar photoUrl={person.avatar_url} avatarKey={person.avatar || "a1"} name={person.display_name} size={44} glow />
       <div className="min-w-0 flex-1">
         <p className="truncate text-[15px] font-semibold">{person.display_name}</p>
@@ -90,8 +88,9 @@ function PersonRow({
           {person.age !== null && ` · ${faNum(person.age)} ساله`}
         </p>
       </div>
+      </Link>
       {children}
-    </Wrapper>
+    </div>
   );
 }
 
@@ -121,24 +120,24 @@ function RequestRow({ request }: { request: FriendRequest }) {
 /** Tapping a friend opens the private chat — that is the point of the list. */
 function FriendRow({ person }: { person: Person }) {
   const navigate = useNavigate();
-  const conversations = useChat((s) => s.conversations);
-
-  const direct = conversations.find(
-    (c) => c.type === "DIRECT" && c.participants.some((p) => p.id === person.id),
-  );
-
-  return (
-    <PersonRow
-      person={person}
-      onOpen={direct ? () => navigate(`/c/${direct.id}`) : undefined}
-    >
-      {direct ? (
-        <span className="shrink-0 text-xs text-muted">گفتگو ›</span>
-      ) : (
-        <FriendButton userId={person.id} relation="FRIENDS" compact />
-      )}
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  async function open() {
+    if (busy) return;
+    setBusy(true); setError("");
+    try {
+      const result = await openFriendConversation(person.id);
+      navigate(`/c/${result.conversation_id}`);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.firstMessage || "گفتگو باز نشد." : "ارتباط قطع شد؛ دوباره تلاش کن.");
+    } finally { setBusy(false); }
+  }
+  return <div>
+    <PersonRow person={person}>
+      <button type="button" disabled={busy} onClick={() => void open()} className="min-h-11 shrink-0 rounded-field bg-surface-2 px-3 text-xs text-brand-soft">{busy ? "در حال بازکردن…" : "پیام بده ›"}</button>
     </PersonRow>
-  );
+    {error && <p role="alert" className="px-4 pb-2 text-xs text-bad">{error}</p>}
+  </div>;
 }
 
 function Empty() {

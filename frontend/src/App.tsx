@@ -5,10 +5,12 @@ import { ChatListScreen } from "@/features/chat/ChatListScreen";
 import { ChatRoomScreen } from "@/features/chat/ChatRoomScreen";
 import { FriendsScreen } from "@/features/friends/FriendsScreen";
 import { OfflineBar, UpdateToast } from "@/features/pwa/PwaChrome";
+import { AuthScreen } from "@/features/onboarding/AuthScreen";
 import { Onboarding } from "@/features/onboarding/Onboarding";
 import { PlayScreen } from "@/features/play/PlayScreen";
 import { GameInviteNotice, GameInvitationsScreen } from "@/features/play/GameInvitations";
 import { useInvitations } from "@/store/invitations";
+import { PublicProfileScreen } from "@/features/profile/PublicProfileScreen";
 import { ProfileScreen } from "@/features/profile/ProfileScreen";
 import { useChat } from "@/store/chat";
 import { useGame } from "@/store/game";
@@ -64,6 +66,7 @@ export default function App() {
 
   if (status === "loading") return <Splash />;
   if (status === "error") return <ConnectionError message={error} onRetry={bootstrap} />;
+  if (status === "anonymous" || !user) return <AuthScreen />;
   if (user && !user.is_onboarded) return <Onboarding />;
 
   return (
@@ -91,6 +94,7 @@ function RoutedScreens() {
         <Route path="/chats" element={<ChatListScreen />} />
         <Route path="/c/:id" element={<ChatRoomScreen />} />
         <Route path="/friends" element={<FriendsScreen />} />
+        <Route path="/people/:userId" element={<PublicProfileScreen />} />
         <Route path="/profile" element={<ProfileScreen />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

@@ -10,7 +10,7 @@ type InvitationStore = {
   init: () => void;
   load: () => Promise<void>;
   send: (userId: number) => Promise<GameInvitation>;
-  respond: (id: number, action: "accept" | "decline" | "cancel") => Promise<GameInvitation>;
+  respond: (id: number, action: "accept" | "decline" | "cancel", conversationId?: string) => Promise<GameInvitation>;
   dismiss: () => void;
 };
 let wired = false;
@@ -36,8 +36,8 @@ export const useInvitations = create<InvitationStore>((set, get) => ({
     await get().load();
     return row;
   },
-  async respond(id, action) {
-    const row = await authFetch<GameInvitation>(`/game-invitations/${id}/${action}/`, { method: "POST" });
+  async respond(id, action, conversationId) {
+    const row = await authFetch<GameInvitation>(`/game-invitations/${id}/${action}/`, { method: "POST", body: JSON.stringify({ conversation_id: conversationId }) });
     set({ notice: null });
     await get().load();
     return row;

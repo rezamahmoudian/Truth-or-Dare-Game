@@ -27,6 +27,17 @@ function lastServerId(messages: AnyMessage[] | undefined): number {
  * of ours (matched by client_id), it is one we already hold (a retry or a
  * duplicate delivery), or it is new.
  */
+function isActivePending(message: AnyMessage): boolean {
+  // Failed optimistic messages stay pending so they can be retried, but they
+  // are no longer "new" messages that should be floated to the bottom.
+  return isPending(message) && !message.failed;
+}
+
+function messageTime(message: AnyMessage): number {
+  const time = Date.parse(message.created_at);
+  return Number.isFinite(time) ? time : 0;
+}
+
 function mergeMessage(existing: AnyMessage[], incoming: Message): AnyMessage[] {
   const byClientId = incoming.client_id
     ? existing.findIndex((m) => m.client_id === incoming.client_id)
@@ -41,9 +52,17 @@ function mergeMessage(existing: AnyMessage[], incoming: Message): AnyMessage[] {
 
   const next = [...existing, incoming];
   next.sort((a, b) => {
-    if (isPending(a)) return 1;
-    if (isPending(b)) return -1;
-    return a.id - b.id;
+    // Only messages still being sent are floated to the end while their
+    // server response is pending. A failed message is history at its original
+    // time and must not jump below messages sent after it.
+    const activeA = isActivePending(a);
+    const activeB = isActivePending(b);
+    if (activeA !== activeB) return activeA ? 1 : -1;
+
+    const timeDifference = messageTime(a) - messageTime(b);
+    if (timeDifference) return timeDifference;
+    if (!isPending(a) && !isPending(b)) return a.id - b.id;
+    return 0;
   });
   return next;
 }

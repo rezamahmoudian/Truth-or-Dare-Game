@@ -14,6 +14,8 @@ def person_payload(user: User, *, relation: str | None = None) -> dict:
         "avatar": user.avatar,
         "avatar_url": user.avatar_url,
         "bio": user.bio,
+        "city": user.city,
+        "interests": user.interests,
         "gender": user.gender,
         "age": user.age,
         "is_ai": user.is_ai,

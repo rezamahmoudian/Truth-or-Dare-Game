@@ -82,6 +82,13 @@ class PromptSuggestionView(APIView):
         )
 
 
+class GameStartSerializer(serializers.Serializer):
+    category = serializers.ChoiceField(choices=["", *Category.values], default="")
+    max_intensity = serializers.IntegerField(min_value=1, max_value=3, default=2)
+    play_mode = serializers.ChoiceField(choices=["CLASSIC", "DEEP_TALK"], default="CLASSIC")
+    replace_session_id = serializers.IntegerField(min_value=1, required=False)
+
+
 class GameStateView(APIView):
     """Current game state for a conversation.
 
@@ -98,12 +105,9 @@ class GameStateView(APIView):
 
     def post(self, request, conversation_id) -> Response:
         participant = chat_services.active_participant(request.user, conversation_id)
-        services.start_game(
-            request.user,
-            participant.conversation,
-            category=str(request.data.get("category") or ""),
-            max_intensity=int(request.data.get("max_intensity") or 2),
-        )
+        serializer = GameStartSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        services.start_game(request.user, participant.conversation, **serializer.validated_data)
         return Response(
             services.state_of(conversation_id), status=status.HTTP_201_CREATED
         )

@@ -14,7 +14,7 @@ type SocialStore = {
   init: () => void;
   load: () => Promise<void>;
   request: (userId: number) => Promise<void>;
-  accept: (userId: number) => Promise<string>;
+  accept: (userId: number) => Promise<void>;
   decline: (userId: number) => Promise<void>;
   remove: (userId: number) => Promise<void>;
   setRelation: (userId: number, relation: Relation) => void;
@@ -61,10 +61,9 @@ export const useSocial = create<SocialStore>((set, get) => ({
   },
 
   async accept(userId) {
-    const result = await api.acceptFriend(userId);
+    await api.acceptFriend(userId);
     get().setRelation(userId, "FRIENDS");
     await get().load();
-    return result.conversation_id;
   },
 
   async decline(userId) {

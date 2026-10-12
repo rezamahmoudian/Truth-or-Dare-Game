@@ -1,7 +1,7 @@
 """Friendship.
 
 The product's whole loop converges here: a random game produces a friend
-request, accepting it opens a private conversation, and that conversation is
+request, accepting it adds a friend, and their shared conversation is
 what brings someone back on day ten. Everything in this module is one step of
 that chain.
 """
@@ -155,7 +155,7 @@ def accept_request(user: User, other_id: int) -> Friendship:
     if row.status == FriendshipStatus.ACCEPTED:
         return row
 
-    conversation = chat_services.get_or_create_direct(user, other)
+    conversation = chat_services.pair_conversations(user, other).first()
 
     row.status = FriendshipStatus.ACCEPTED
     row.responded_at = timezone.now()
@@ -168,18 +168,12 @@ def accept_request(user: User, other_id: int) -> Friendship:
             "event": "social.request_accepted",
             "user_id": user.pk,
             "target": other.pk,
-            "conversation_id": str(conversation.id),
+            "conversation_id": str(conversation.id) if conversation else None,
         },
     )
 
-    # Opened with a line already in it: an empty private chat between two
-    # people who have spoken once is a hard thing to start.
-    chat_services.post_system_message(
-        conversation, "حالا دوست هستید. گفتگو را همین‌جا ادامه دهید."
-    )
-
     payload = {
-        "conversation_id": str(conversation.id),
+        "conversation_id": str(conversation.id) if conversation else None,
     }
     transaction.on_commit(
         lambda: (
@@ -192,6 +186,19 @@ def accept_request(user: User, other_id: int) -> Friendship:
         )
     )
     return row
+
+
+@transaction.atomic
+def open_conversation(user: User, other_id: int):
+    other = _resolve(user, other_id)
+    list(User.objects.select_for_update().filter(pk__in=[user.pk, other.pk]).order_by("pk"))
+    row = _pair(user, other)
+    if row is None or row.status != FriendshipStatus.ACCEPTED:
+        raise DomainError("not_friends", "ابتدا باید درخواست دوستی پذیرفته شود.", 403)
+    conversation = chat_services.get_or_create_pair(user, other)
+    row.conversation = conversation
+    row.save(update_fields=["conversation"])
+    return conversation
 
 
 @transaction.atomic

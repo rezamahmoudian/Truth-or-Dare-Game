@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
 
 import { ApiError } from "@/lib/auth";
 import type { Relation } from "@/lib/types";
@@ -22,7 +21,6 @@ export function FriendButton({
   relation: Relation | undefined;
   compact?: boolean;
 }) {
-  const navigate = useNavigate();
   const known = useSocial((s) => s.relations[userId]);
   const request = useSocial((s) => s.request);
   const accept = useSocial((s) => s.accept);
@@ -84,12 +82,7 @@ export function FriendButton({
       <button
         type="button"
         disabled={busy}
-        onClick={() =>
-          run(async () => {
-            const conversationId = await accept(userId);
-            navigate(`/c/${conversationId}`);
-          })
-        }
+        onClick={() => run(() => accept(userId))}
         className={`${base} bg-gradient-to-b from-ok to-ok-deep text-white`}
       >
         قبول درخواست

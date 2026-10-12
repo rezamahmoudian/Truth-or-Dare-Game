@@ -5,7 +5,7 @@ from django.utils import timezone
 
 from apps.chat import broadcast, presence
 from apps.chat import services as chat
-from apps.chat.models import Conversation, Participant
+from apps.chat.models import Participant
 from apps.core.errors import DomainError
 from apps.game import services as game
 from apps.matchmaking.models import MatchTicket, TicketState
@@ -35,10 +35,14 @@ def lists(user):
         from_user__is_active=True, to_user__is_active=True
     ).select_related("from_user", "to_user", "conversation").order_by("-created_at")
     result = {"incoming": [], "outgoing": [], "ready": []}
+    ready_conversations = set()
     for row in rows:
         if row.status == "ACCEPTED":
             if not Participant.objects.filter(conversation_id=row.conversation_id, user=user, left_at__isnull=True).exists():
                 continue
+            if row.conversation_id in ready_conversations:
+                continue
+            ready_conversations.add(row.conversation_id)
             key = "ready"
         else:
             key = "outgoing" if row.from_user_id == user.pk else "incoming"
@@ -73,7 +77,7 @@ def send(user, other_id):
 
 
 @transaction.atomic
-def respond(user, invitation_id, action):
+def respond(user, invitation_id, action, *, conversation_id=None):
     row = GameInvitation.objects.select_for_update(of=("self",)).select_related("from_user", "to_user").filter(
         Q(from_user=user) | Q(to_user=user), pk=invitation_id).first()
     if row is None:
@@ -100,10 +104,11 @@ def respond(user, invitation_id, action):
             ticket.state = TicketState.CANCELLED
             ticket.save(update_fields=["state"])
             transaction.on_commit(lambda uid=ticket.user_id: broadcast.to_users([uid], "mm.cancelled", {}))
-        room = Conversation.objects.create(type="ROOM", status="ACTIVE", max_players=2, owner=row.from_user)
-        Participant.objects.bulk_create([Participant(conversation=room, user_id=uid) for uid in ids])
+        room = chat.get_or_create_pair(row.from_user, row.to_user, room=True, preferred_id=conversation_id)
         chat.post_system_message(room, "دعوت بازی پذیرفته شد. بازی دونفره آماده است!")
-        game.start_game(row.from_user, room)
+        if not game.active_session(room.pk):
+            # Both participants agreed; an existing ROOM may belong to the recipient.
+            game.start_game(room.owner if room.type == "ROOM" else row.from_user, room)
         row.conversation = room
         row.status = "ACCEPTED"
     else:

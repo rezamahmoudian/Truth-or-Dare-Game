@@ -20,6 +20,29 @@ def validate_handle(value: str) -> str:
     return value
 
 
+class LoginSerializer(serializers.Serializer):
+    username = serializers.CharField(max_length=150)
+    password = serializers.CharField(write_only=True, trim_whitespace=False, max_length=256)
+
+
+class RegisterSerializer(serializers.Serializer):
+    username = serializers.CharField(max_length=20)
+    password = serializers.CharField(write_only=True, trim_whitespace=False, max_length=256)
+    password_confirm = serializers.CharField(write_only=True, trim_whitespace=False, max_length=256)
+
+    def validate_username(self, value):
+        value = validate_handle(value)
+        if User.objects.filter(username__iexact=value).exists():
+            raise serializers.ValidationError("این نام کاربری قبلاً گرفته شده است.")
+        return value
+
+    def validate(self, attrs):
+        if attrs["password"] != attrs["password_confirm"]:
+            raise serializers.ValidationError({"password_confirm": "تکرار رمز عبور مطابقت ندارد."})
+        validate_password(attrs["password"], user=User(username=attrs["username"]))
+        return attrs
+
+
 class GuestAuthSerializer(serializers.Serializer):
     """Sign in (or silently sign up) with a client-generated device token."""
 
@@ -45,6 +68,11 @@ class PublicUserSerializer(serializers.ModelSerializer):
 
 
 class MeSerializer(serializers.ModelSerializer):
+    interests = serializers.ListField(child=serializers.CharField(max_length=24, allow_blank=False), max_length=10, required=False)
+
+    def validate_interests(self, value):
+        return list(dict.fromkeys(value))
+
     avatar_url = serializers.ReadOnlyField()
     age = serializers.IntegerField(read_only=True)
     is_onboarded = serializers.BooleanField(read_only=True)
@@ -59,6 +87,8 @@ class MeSerializer(serializers.ModelSerializer):
             "avatar",
             "avatar_url",
             "bio",
+            "city",
+            "interests",
             "gender",
             "birth_date",
             "age",

@@ -1,3 +1,4 @@
+import { Link } from "react-router-dom";
 import { useEffect, useState } from "react";
 
 import { FriendButton } from "@/features/friends/FriendButton";
@@ -78,7 +79,7 @@ export function PlayersSheet({
                 key={person.id}
                 className="flex items-center gap-3 border-b border-line-soft py-3 last:border-b-0"
               >
-                <span className="relative shrink-0">
+                <Link to={`/people/${person.id}`} aria-label={`پروفایل ${person.display_name}`} className="relative shrink-0">
                   <Avatar
                     photoUrl={person.avatar_url} avatarKey={person.avatar || "a1"}
                     name={person.display_name}
@@ -88,11 +89,11 @@ export function PlayersSheet({
                   {onlineIds.includes(person.id) && (
                     <span className="absolute bottom-0 end-0 size-3 rounded-full border-2 border-surface bg-ok" />
                   )}
-                </span>
+                </Link>
 
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-[15px] font-bold">
-                    {person.display_name}
+                    <Link to={`/people/${person.id}`}>{person.display_name}</Link>
                     {isSelf && <span className="text-xs text-muted"> (شما)</span>}
                   </p>
                   <p className="truncate text-xs text-muted">

@@ -44,6 +44,8 @@ class User(AbstractUser):
     avatar = models.CharField(max_length=8, choices=AVATAR_CHOICES, blank=True)
     profile_photo = models.CharField(max_length=100, blank=True, editable=False)
     bio = models.CharField(max_length=160, blank=True)
+    city = models.CharField("شهر", max_length=64, blank=True)
+    interests = models.JSONField("علایق", default=list, blank=True)
     is_ai = models.BooleanField("شخصیت هوش مصنوعی", default=False, editable=False)
 
     # --- matchmaking attributes -------------------------------------------
@@ -266,7 +268,7 @@ class Friendship(models.Model):
         max_length=8, choices=FriendshipStatus.choices, default=FriendshipStatus.PENDING
     )
 
-    # The DIRECT conversation opened when the request was accepted.
+    # Their shared two-person history, linked when available or opened explicitly.
     conversation = models.ForeignKey(
         "chat.Conversation", on_delete=models.SET_NULL, null=True, blank=True
     )

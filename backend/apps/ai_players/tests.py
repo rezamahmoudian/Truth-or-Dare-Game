@@ -48,7 +48,8 @@ class AIPlayerTests(TestCase):
         self.client = APIClient()
         self.client.force_authenticate(self.human)
         for target in ["apps.chat.broadcast.to_users", "apps.chat.broadcast.to_conversation", "apps.ai_players.services.dispatch",
-                       "apps.ai_players.services.schedule_delivery"]:
+                       "apps.ai_players.services.schedule_delivery",
+                       "apps.ai_players.services.schedule_silence_continuation"]:
             mock = patch(target)
             mock.start()
             self.addCleanup(mock.stop)
@@ -349,6 +350,83 @@ class AIPlayerTests(TestCase):
         self.assertEqual(game.current_turn(session).player_id, self.human.pk)
         self.assertEqual(Message.objects.filter(conversation=state.conversation, type="GAME_PROMPT").count(), prompt_count)
         self.assertTrue(Message.objects.filter(conversation=state.conversation, meta__game="prompts_exhausted").exists())
+
+    def test_confirming_answer_can_have_chat_before_ai_confirms(self):
+        state = self.matched()
+        Prompt.objects.create(
+            type="TRUTH", text="چه موسیقی دوست داری؟", review_status="APPROVED", is_active=True
+        )
+        with patch("apps.game.services.random.shuffle", side_effect=lambda ids: ids.sort()), self.captureOnCommitCallbacks(execute=True):
+            session = game.start_game(self.human, state.conversation)
+            turn = game.current_turn(session)
+            self.assertEqual(turn.player_id, self.human.pk)
+            game.choose(self.human, turn.pk, "TRUTH")
+            game.answer(self.human, turn.pk, "راک")
+        state.refresh_from_db()
+        action, _, context = services.snapshot(state)
+        self.assertEqual(action, "confirm")
+        self.assertEqual(context["allowed_actions"], ["chat", "confirm"])
+
+        def run_action(reply):
+            with patch("apps.ai_players.tasks.reply_delay_seconds", return_value=0), patch(
+                "apps.ai_players.client.generate", return_value=(reply, {"output_tokens": 4})
+            ), self.captureOnCommitCallbacks(execute=True):
+                tasks.respond(str(state.pk))
+                for request in AIRequest.objects.filter(conversation=state, status="READY"):
+                    tasks.deliver(str(request.pk))
+
+        run_action({"action": "chat", "text": "منم راک دوست دارم، مخصوصاً وقتی حال آدم گرفته‌ست", "choice": "TRUTH"})
+        turn.refresh_from_db()
+        self.assertEqual(turn.status, TurnStatus.CONFIRMING)
+        self.assertEqual(Message.objects.filter(conversation=state.conversation, sender=self.persona.user).count(), 1)
+        Message.objects.bulk_create([
+            Message(conversation=state.conversation, sender=self.persona.user, body="ادامهٔ کوتاه اول"),
+            Message(conversation=state.conversation, sender=self.persona.user, body="ادامهٔ کوتاه دوم"),
+        ])
+        _, _, capped_context = services.snapshot(state)
+        self.assertEqual(capped_context["confirming_chat_messages"], 3)
+        self.assertEqual(capped_context["allowed_actions"], ["confirm"])
+
+        with self.captureOnCommitCallbacks(execute=True):
+            chat.post_message(conversation=state.conversation, sender=self.human, body="دقیقاً، تو چه خواننده‌ای رو بیشتر گوش می‌دی؟")
+        run_action({"action": "confirm", "text": "آره، انتخاب خوبیه", "choice": "TRUTH"})
+        turn.refresh_from_db()
+        self.assertEqual(turn.status, TurnStatus.DONE)
+
+    def test_provider_schema_allows_chat_or_confirm_when_context_allows_both(self):
+        response = {"status": "completed", "output": [{"type": "message", "content": [
+            {"type": "output_text", "text": '{"action":"chat","text":"چه انتخاب خوبی","choice":"TRUTH"}'}]}]}
+        context = {"allowed_actions": ["chat", "confirm"], "history": []}
+        with patch("apps.ai_players.client.urlopen") as http:
+            http.return_value.__enter__.return_value.read.return_value = json.dumps(response).encode()
+            reply, _ = client.generate(self.persona, context, "confirm")
+        body = json.loads(http.call_args.args[0].data)
+        self.assertEqual(body["text"]["format"]["schema"]["properties"]["action"]["enum"], ["chat", "confirm"])
+        self.assertEqual(reply["action"], "chat")
+
+    def test_silence_continuation_confirms_after_ai_chat(self):
+        state = self.matched()
+        Prompt.objects.create(
+            type="TRUTH", text="چه موسیقی دوست داری؟", review_status="APPROVED", is_active=True
+        )
+        with patch("apps.game.services.random.shuffle", side_effect=lambda ids: ids.sort()), self.captureOnCommitCallbacks(execute=True):
+            session = game.start_game(self.human, state.conversation)
+            turn = game.current_turn(session)
+            game.choose(self.human, turn.pk, "TRUTH")
+            game.answer(self.human, turn.pk, "راک")
+        state.refresh_from_db()
+        reply = {"action": "chat", "text": "چه انتخاب خوبی", "choice": "TRUTH"}
+        with patch("apps.ai_players.tasks.reply_delay_seconds", return_value=0), patch(
+            "apps.ai_players.client.generate", return_value=(reply, {})
+        ), self.captureOnCommitCallbacks(execute=True):
+            tasks.respond(str(state.pk))
+            request = AIRequest.objects.get(conversation=state, status="READY")
+            tasks.deliver(str(request.pk))
+        state.refresh_from_db()
+        message = Message.objects.get(conversation=state.conversation, sender=self.persona.user)
+        tasks.continue_after_silence(str(state.pk), state.revision, message.pk)
+        turn.refresh_from_db()
+        self.assertEqual(turn.status, TurnStatus.DONE)
 
     def test_context_is_scoped_and_excludes_deleted_text(self):
         state = self.matched()

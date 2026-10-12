@@ -1,4 +1,5 @@
 import logging
+from django.contrib.auth import authenticate
 
 from django.db import IntegrityError, transaction
 from rest_framework import generics, status
@@ -13,6 +14,8 @@ from apps.users.models import User, hash_device_token
 from apps.users.payloads import person_payload, request_payload
 from apps.users.serializers import (
     GuestAuthSerializer,
+    LoginSerializer,
+    RegisterSerializer,
     MeSerializer,
     UpgradeAccountSerializer,
 )
@@ -25,12 +28,47 @@ def issue_tokens(user: User) -> dict[str, str]:
     return {"access": str(refresh.access_token), "refresh": str(refresh)}
 
 
-class GuestAuthView(APIView):
-    """Sign in with a device token, creating the account on first contact.
+class LoginView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
+    throttle_scope = "auth"
 
-    There is no registration step because the product spreads through shared
-    links: someone tapping a friend's game invitation should land in the game,
-    not on a signup form. The account becomes recoverable later via /upgrade/.
+    def post(self, request):
+        serializer = LoginSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        existing = User.objects.filter(username__iexact=data["username"].strip()).first()
+        username = existing.username if existing else data["username"].strip()
+        user = authenticate(request=request, username=username, password=data["password"])
+        if user is None or user.is_ai:
+            return Response({"detail": "نام کاربری یا رمز عبور درست نیست."}, status=401)
+        user.touch_last_seen()
+        return Response({**issue_tokens(user), "user": MeSerializer(user).data})
+
+
+class RegisterView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
+    throttle_scope = "auth"
+
+    def post(self, request):
+        serializer = RegisterSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        try:
+            with transaction.atomic():
+                user = User.objects.create_user(username=data["username"], password=data["password"], is_guest=False)
+        except IntegrityError:
+            return Response({"username": ["این نام کاربری قبلاً گرفته شده است."]}, status=400)
+        user.touch_last_seen()
+        return Response({**issue_tokens(user), "user": MeSerializer(user).data}, status=201)
+
+
+class GuestAuthView(APIView):
+    """Compatibility for legacy guest clients and explicit guest recovery.
+
+    New browser sessions use the separate login/register endpoints. Upgraded
+    accounts must authenticate with their password instead of a device token.
     """
 
     permission_classes = [AllowAny]
@@ -59,6 +97,9 @@ class GuestAuthView(APIView):
             except IntegrityError:
                 # Two launches raced with the same token; the other one won.
                 user = User.objects.get(device_token_hash=token_hash)
+
+        if not user.is_guest:
+            return Response({"detail": "این حساب نام کاربری و رمز دارد؛ از بخش ورود استفاده کن."}, status=409)
 
         if not user.is_active:
             return Response(
@@ -147,9 +188,8 @@ class PublicProfileView(APIView):
         other = User.objects.filter(is_active=True, **lookup).first()
         if other is None:
             raise DomainError("user_not_found", "کاربر پیدا نشد.", 404)
-        return Response(
-            person_payload(other, relation=social.relation_to(request.user, other))
-        )
+        from apps.users.profiles import profile_payload
+        return Response(profile_payload(other, relation=social.relation_to(request.user, other)))
 
 
 class FriendListView(APIView):
@@ -204,12 +244,20 @@ class FriendAcceptView(APIView):
         friendship = social.accept_request(request.user, user_id)
         return Response(
             {
-                "conversation_id": str(friendship.conversation_id),
+                "conversation_id": str(friendship.conversation_id) if friendship.conversation_id else None,
                 "user": person_payload(
                     friendship.other_than(request.user.pk), relation="FRIENDS"
                 ),
             }
         )
+
+
+class FriendConversationView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, user_id: int) -> Response:
+        conversation = social.open_conversation(request.user, user_id)
+        return Response({"conversation_id": str(conversation.pk)})
 
 
 class FriendDeclineView(APIView):

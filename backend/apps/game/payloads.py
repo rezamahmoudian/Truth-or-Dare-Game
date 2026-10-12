@@ -66,6 +66,7 @@ def session_payload(
             "turn_index": session.turn_index,
             "round_number": session.round_number,
             "category": session.category,
+            "play_mode": session.play_mode,
             "max_intensity": session.max_intensity,
             "ended_reason": session.ended_reason,
         },

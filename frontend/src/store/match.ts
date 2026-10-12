@@ -28,6 +28,21 @@ type MatchStore = {
 
 let wired = false;
 let matchVersion = 0;
+const PENDING_SEARCH_KEY = "ft.pending-search";
+let pendingSearchId: number | undefined;
+function rememberSearch(id: number | null) {
+  pendingSearchId = id ?? undefined;
+  try {
+    if (id === null) sessionStorage.removeItem(PENDING_SEARCH_KEY);
+    else sessionStorage.setItem(PENDING_SEARCH_KEY, String(id));
+  } catch { /* Private browsers may disable storage; recovery still works in memory. */ }
+}
+function rememberedSearch(): number | undefined {
+  try {
+    const id = Number(sessionStorage.getItem(PENDING_SEARCH_KEY));
+    return Number.isSafeInteger(id) && id > 0 ? id : undefined;
+  } catch { return pendingSearchId; }
+}
 
 export const useMatch = create<MatchStore>((set, get) => ({
   aiSettings: null,
@@ -48,11 +63,13 @@ export const useMatch = create<MatchStore>((set, get) => ({
       switch (type) {
         case "mm.queued":
         case "mm.searching":
+          rememberSearch(Number(data.id));
           set({ ticket: data as unknown as MatchTicket, expired: null });
           break;
 
         case "mm.matched":
           matchVersion += 1;
+          rememberSearch(null);
           set({
             ticket: null,
             matchedConversationId: String(data.conversation_id),
@@ -60,6 +77,8 @@ export const useMatch = create<MatchStore>((set, get) => ({
           break;
 
         case "mm.expired":
+          matchVersion += 1;
+          rememberSearch(null);
           set({
             ticket: null,
             expired: { suggestedMode: String(data.suggested_mode ?? "group") },
@@ -67,6 +86,8 @@ export const useMatch = create<MatchStore>((set, get) => ({
           break;
 
         case "mm.cancelled":
+          matchVersion += 1;
+          rememberSearch(null);
           set({ ticket: null });
           break;
       }
@@ -76,8 +97,8 @@ export const useMatch = create<MatchStore>((set, get) => ({
     // are no longer in — or drop them off one they still are. The lobby's
     // queue health and presence row are stale by then too.
     socket.onResume(() => {
-      void get().resume();
-      void get().loadLobby();
+      void get().resume().catch(() => undefined);
+      void get().loadLobby().catch(() => undefined);
     });
   },
 
@@ -97,21 +118,39 @@ export const useMatch = create<MatchStore>((set, get) => ({
   },
 
   async resume() {
-    const status = await api.getMatchStatus();
-    set({ ticket: "id" in status && status.state === "QUEUED" ? status : null });
+    const version = matchVersion;
+    const status = await api.getMatchStatus(get().ticket?.id ?? rememberedSearch());
+    if (version !== matchVersion) return;
+    if ("id" in status && status.state === "MATCHED" && status.conversation_id) {
+      matchVersion += 1;
+      rememberSearch(null);
+      set({ ticket: null, matchedConversationId: status.conversation_id });
+    } else if ("id" in status && status.state === "QUEUED") {
+      rememberSearch(status.id);
+      set({ ticket: status });
+    } else {
+      rememberSearch(null);
+      set({ ticket: null });
+    }
   },
 
   async enqueue(mode, aiConsent = false) {
     set({ error: null, expired: null });
-    const startedVersion = matchVersion;
+    const startedVersion = ++matchVersion;
     const ticket = await api.enqueue(mode, aiConsent);
     if (ticket.state === "MATCHED" && ticket.conversation_id) {
+      rememberSearch(null);
       set({ ticket: null, matchedConversationId: ticket.conversation_id });
-    } else if (startedVersion === matchVersion) set({ ticket });
+    } else if (startedVersion === matchVersion) {
+      rememberSearch(ticket.state === "QUEUED" ? ticket.id : null);
+      set({ ticket: ticket.state === "QUEUED" ? ticket : null });
+    }
   },
 
   async cancel() {
+    matchVersion += 1;
     await api.cancelMatch();
+    rememberSearch(null);
     set({ ticket: null });
   },
 

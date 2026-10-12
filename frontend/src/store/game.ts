@@ -9,7 +9,7 @@ type GameStore = {
   choiceErrors: Record<number, string>;
   init: () => void;
   load: (conversationId: string) => Promise<void>;
-  start: (conversationId: string, maxIntensity: number) => Promise<void>;
+  start: (conversationId: string, maxIntensity: number, options?: { play_mode?: "CLASSIC" | "DEEP_TALK"; replace_session_id?: number }) => Promise<void>;
   stop: (conversationId: string) => Promise<void>;
   choose: (turnId: number, choice: "TRUTH" | "DARE") => void;
   answer: (turnId: number, body: string) => void;
@@ -63,9 +63,10 @@ export const useGame = create<GameStore>((set, get) => ({
     }));
   },
 
-  async start(conversationId, maxIntensity) {
+  async start(conversationId, maxIntensity, options = {}) {
     const state = await api.startGame(conversationId, {
       max_intensity: maxIntensity,
+      ...options,
     });
     set((store) => ({
       byConversation: { ...store.byConversation, [conversationId]: state },

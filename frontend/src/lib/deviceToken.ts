@@ -41,3 +41,7 @@ export function isPersistent(): boolean {
     return false;
   }
 }
+
+export function hasExistingDeviceToken(): boolean {
+  try { return !!localStorage.getItem(STORAGE_KEY); } catch { return !!memoryToken; }
+}

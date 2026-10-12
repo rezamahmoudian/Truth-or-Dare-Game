@@ -31,7 +31,7 @@ class MatchMode(models.Model):
 
     min_age = models.PositiveSmallIntegerField(default=18)
     requires_premium = models.BooleanField(default=False)
-    # Daily cap. The scarce-direction gender queue is the one that starves, and
+    # Rolling 24-hour cap on engaged matches, never queue entries. The scarce-direction gender queue is the one that starves, and
     # an uncapped free filter is what starves it — see the notes in seed.
     daily_limit = models.PositiveSmallIntegerField(default=0)
 
@@ -96,6 +96,11 @@ class MatchTicket(models.Model):
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    # Separate the search, connection, and actual usage. Closed pending tickets
+    # stay free even when the same conversation is reopened for a friend chat.
+    matched_at = models.DateTimeField(null=True, blank=True)
+    quota_consumed_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    quota_closed_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         indexes = [models.Index(fields=["state", "created_at"])]

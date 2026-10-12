@@ -14,6 +14,7 @@ from apps.chat.models import (
     ConversationStatus,
     ConversationType,
     Message,
+    MessageType,
     Participant,
 )
 from apps.core.errors import DomainError
@@ -97,7 +98,8 @@ def match_ticket(ticket):
     AIConversation.objects.create(conversation=conversation, human=ticket.user, persona=persona)
     notify(conversation.pk)
     ticket.state, ticket.conversation = TicketState.MATCHED, conversation
-    ticket.save(update_fields=["state", "conversation"])
+    ticket.matched_at = timezone.now()
+    ticket.save(update_fields=["state", "conversation", "matched_at"])
     transaction.on_commit(lambda: broadcast.to_users([ticket.user_id], "mm.matched", {
         "conversation_id": str(conversation.pk), "mode": ticket.mode.key,
         "player_ids": [ticket.user_id, persona.user_id],
@@ -131,6 +133,8 @@ def expire_session(conversation_id):
     conversation = Conversation.objects.select_for_update().get(pk=conversation_id)
     if conversation.status == ConversationStatus.CLOSED:
         return False
+    from apps.matchmaking.quota import close_pending
+    close_pending(conversation.pk)
     conversation.status = ConversationStatus.CLOSED
     conversation.save(update_fields=["status"])
     state.handled_revision = state.revision
@@ -177,6 +181,53 @@ def schedule_delivery(request_id, deliver_at):
         logger.warning("ai.delivery_queue_unavailable")
 
 
+def schedule_silence_continuation(conversation_id, revision, message_id):
+    """Move a confirming turn on if the player stays silent after AI chat."""
+    timeout = max(0, int(getattr(settings, "AI_CONFIRMING_CHAT_TIMEOUT_SECONDS", 180)))
+    if timeout <= 0:
+        return
+    from .tasks import continue_after_silence
+    try:
+        continue_after_silence.apply_async(
+            args=[str(conversation_id), int(revision), int(message_id)],
+            countdown=timeout,
+        )
+    except (OperationalError, OSError):
+        # recover_pending() also looks for overdue silent turns, so a broker
+        # interruption does not permanently strand the game.
+        logger.warning("ai.silence_queue_unavailable")
+
+
+def recover_silent_confirmations():
+    """Enqueue overdue silence continuations missed by the broker."""
+    timeout = max(0, int(getattr(settings, "AI_CONFIRMING_CHAT_TIMEOUT_SECONDS", 180)))
+    if timeout <= 0:
+        return
+    now = timezone.now()
+    cutoff = now - timedelta(seconds=timeout)
+    states = AIConversation.objects.filter(
+        expires_at__gt=now, conversation__status=ConversationStatus.ACTIVE,
+    ).select_related("persona__user", "human")[:100]
+    for state in states:
+        session = game.active_session(state.pk)
+        turn = game.current_turn(session) if session else None
+        if not turn or turn.status != TurnStatus.CONFIRMING or turn.player_id != state.human_id:
+            continue
+        message = (Message.objects.filter(
+            conversation_id=state.pk, id__gt=turn.answer_message_id or 0,
+            sender_id=state.persona.user_id, type=MessageType.TEXT,
+            is_deleted=False, created_at__lte=cutoff,
+        ).order_by("-id").first())
+        if not message:
+            continue
+        if Message.objects.filter(
+            conversation_id=state.pk, sender_id=state.human_id,
+            id__gt=message.id, is_deleted=False,
+        ).exists():
+            continue
+        schedule_silence_continuation(state.pk, state.revision, message.pk)
+
+
 def snapshot(state):
     session = game.active_session(state.pk)
     turn = game.current_turn(session) if session else None
@@ -188,7 +239,9 @@ def snapshot(state):
         elif turn.status == TurnStatus.ANSWERING:
             action = "answer"
     elif turn and turn.status == TurnStatus.CONFIRMING:
-        action = "confirm"
+        # Only the opponent can confirm a turn. If the AI just answered, wait
+        # for the human instead of trying to confirm its own answer.
+        action = "confirm" if turn.player_id == state.human_id else "wait"
     messages = Message.objects.filter(conversation_id=state.pk, is_deleted=False)
     latest_id = messages.order_by("-id").values_list("id", flat=True).first()
     latest = messages.filter(sender__isnull=False).order_by("-id").first()
@@ -200,9 +253,25 @@ def snapshot(state):
                 .order_by("-id")[:max(1, min(settings.AI_HISTORY_MESSAGES, 40))])
     if action == "chat" and latest and latest.sender_id == state.persona.user_id:
         action = "wait"
+    allowed_actions = [action] if action != "wait" else []
+    confirming_chat_count = 0
+    if action == "confirm" and turn and turn.answer_message_id:
+        # Only ordinary AI chat messages after this answer count. Game events
+        # are deliberately excluded from the conversational allowance.
+        confirming_chat_count = messages.filter(
+            id__gt=turn.answer_message_id,
+            sender_id=state.persona.user_id,
+            type=MessageType.TEXT,
+        ).count()
+        max_chat_messages = max(0, int(getattr(settings, "AI_MAX_CONFIRMING_CHAT_MESSAGES", 3)))
+        allowed_actions = (
+            ["confirm"] if confirming_chat_count >= max_chat_messages else ["chat", "confirm"]
+        )
     batch_ready_at = (pending[-1].created_at + timedelta(seconds=max(0, settings.AI_MESSAGE_BATCH_SECONDS))
                       if pending else None)
     context = {
+        "allowed_actions": allowed_actions,
+        "confirming_chat_messages": confirming_chat_count,
         "latest_message_id": latest_id,
         "batch_ready_at": batch_ready_at.isoformat() if batch_ready_at else None,
         "pending_user_messages": [

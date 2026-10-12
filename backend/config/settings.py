@@ -162,6 +162,7 @@ REST_FRAMEWORK = {
         # Joining and leaving the queue repeatedly is cheap for the user and
         # expensive for the matcher.
         "match": env("THROTTLE_MATCH", default="120/hour"),
+        "match_status": env("THROTTLE_MATCH_STATUS", default="60/minute"),
     },
 }
 
@@ -216,6 +217,11 @@ AI_DAILY_REQUEST_LIMIT = env.int("AI_DAILY_REQUEST_LIMIT", default=1000)
 AI_USER_DAILY_REQUEST_LIMIT = env.int("AI_USER_DAILY_REQUEST_LIMIT", default=100)
 AI_HISTORY_MESSAGES = env.int("AI_HISTORY_MESSAGES", default=24)
 AI_MESSAGE_BATCH_SECONDS = env.float("AI_MESSAGE_BATCH_SECONDS", default=1.5)
+# Backend guard for the short conversation after a human answers a prompt.
+AI_MAX_CONFIRMING_CHAT_MESSAGES = env.int("AI_MAX_CONFIRMING_CHAT_MESSAGES", default=3)
+# If the player goes quiet after an AI chat reply, let the game move on after
+# this delay. Set to 0 to disable the automatic continuation.
+AI_CONFIRMING_CHAT_TIMEOUT_SECONDS = env.int("AI_CONFIRMING_CHAT_TIMEOUT_SECONDS", default=180)
 
 # --------------------------------------------------------------------------
 # Localisation — the product is Persian and RTL

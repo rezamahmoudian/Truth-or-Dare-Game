@@ -122,6 +122,7 @@ class GameSession(models.Model):
     category = models.CharField(
         max_length=10, choices=Category.choices, blank=True
     )
+    play_mode = models.CharField(max_length=12, default="CLASSIC", choices=[("CLASSIC", "جرئت یا حقیقت"), ("DEEP_TALK", "گفت‌وگوی عمیق")])
     max_intensity = models.PositiveSmallIntegerField(default=2)
 
     # Avoids repeating a prompt inside one session; across sessions repetition

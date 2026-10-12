@@ -108,7 +108,17 @@ export default defineConfig(({ mode }) => {
       // API base URL has to be configured per environment.
       proxy: {
         "/api": { target: backend, changeOrigin: true },
-        "/ws": { target: backend.replace(/^http/, "ws"), ws: true },
+        // WebSocket clients on a phone use the LAN address as their Origin.
+        // Forward the origin through the dev proxy so Django's
+        // AllowedHostsOriginValidator sees the same trusted backend host as
+        // the HTTP proxy. Without this, LAN sockets are rejected with 403
+        // while localhost appears to work.
+        "/ws": {
+          target: backend.replace(/^http/, "ws"),
+          ws: true,
+          changeOrigin: true,
+          rewriteWsOrigin: true,
+        },
         "/admin": { target: backend, changeOrigin: true },
         "/static": { target: backend, changeOrigin: true },
       },
@@ -120,7 +130,12 @@ export default defineConfig(({ mode }) => {
       // worker — the only way to test installability short of deploying.
       proxy: {
         "/api": { target: backend, changeOrigin: true },
-        "/ws": { target: backend.replace(/^http/, "ws"), ws: true },
+        "/ws": {
+          target: backend.replace(/^http/, "ws"),
+          ws: true,
+          changeOrigin: true,
+          rewriteWsOrigin: true,
+        },
       },
     },
   };

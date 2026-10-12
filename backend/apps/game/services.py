@@ -30,7 +30,7 @@ import logging
 import random
 
 from django.db import transaction
-from django.db.models import Count
+from django.db.models import Count, Q
 from django.utils import timezone
 
 from apps.chat import broadcast
@@ -38,6 +38,7 @@ from apps.chat import services as chat_services
 from apps.chat.models import Conversation, ConversationType, MessageType
 from apps.core.errors import DomainError
 from apps.game.models import (
+    Category,
     GameSession,
     Prompt,
     PromptReviewStatus,
@@ -140,6 +141,18 @@ def _require_own_turn(user: User, turn_id: int, expected: str) -> Turn:
     return turn
 
 
+def friend_pair(conversation: Conversation) -> bool:
+    from apps.users.models import Friendship, FriendshipStatus
+    ids = chat_services.participant_user_ids(conversation.pk)
+    if len(ids) != 2 or conversation.max_players != 2 or conversation.participants.count() != 2:
+        return False
+    a, b = ids
+    return Friendship.objects.filter(
+        Q(from_user_id=a, to_user_id=b) | Q(from_user_id=b, to_user_id=a),
+        status=FriendshipStatus.ACCEPTED,
+    ).exists()
+
+
 def is_owner(user: User, conversation: Conversation) -> bool:
     """A DIRECT chat has two equals, so either of them counts as the owner."""
     if conversation.type == ConversationType.DIRECT:
@@ -200,13 +213,21 @@ def _pick_prompt(session: GameSession, prompt_type: str) -> Prompt:
         intensity__lte=session.max_intensity,
         min_players__lte=len(session.turn_order),
     )
-    if session.category:
+    if session.play_mode == "DEEP_TALK":
+        queryset = queryset.filter(category__in=[Category.FUNNY, Category.BOLD], type=PromptType.TRUTH)
+    elif session.category:
         queryset = queryset.filter(category=session.category)
 
     unused = queryset.exclude(pk__in=session.used_prompt_ids)
     # Used IDs persist for the entire session, including skipped prompts.
     # Exhaustion must never recycle a question already shown to these players.
-    prompt = unused.order_by("?").first()
+    if session.play_mode == "DEEP_TALK":
+        preferred = Category.BOLD if random.random() < 0.7 else Category.FUNNY
+        prompt = unused.filter(category=preferred).order_by("?").first()
+        if prompt is None:
+            prompt = unused.order_by("?").first()
+    else:
+        prompt = unused.order_by("?").first()
 
     if prompt is None:
         if queryset.exists():
@@ -236,6 +257,8 @@ def start_game(
     *,
     category: str = "",
     max_intensity: int = 2,
+    play_mode: str = "CLASSIC",
+    replace_session_id: int | None = None,
 ) -> GameSession:
     """Start a game. Rooms are started by their owner; private chats by either.
 
@@ -254,13 +277,28 @@ def start_game(
     if conversation.status == "CLOSED":
         raise DomainError("room_closed", "این روم بسته شده است.", 410)
 
-    if not is_owner(user, conversation):
-        raise DomainError(
-            "not_room_owner", "فقط سازنده‌ی روم می‌تواند بازی را شروع کند.", 403
-        )
+    friends = friend_pair(conversation)
+    if not is_owner(user, conversation) and not friends:
+        raise DomainError("not_room_owner", "فقط میزبان یا دوستت در چت دونفره می‌تواند بازی را شروع کند.", 403)
+    if play_mode not in ("CLASSIC", "DEEP_TALK"):
+        raise DomainError("invalid_mode", "حالت بازی نامعتبر است.")
+    if play_mode == "DEEP_TALK":
+        if not friends:
+            raise DomainError("friends_only", "گفت‌وگوی عمیق فقط در چت دونفره با دوستت فعال است.", 403)
+        players = list(User.objects.filter(pk__in=chat_services.participant_user_ids(conversation.pk)))
+        if any(p.age is None or p.age < 18 or not p.is_active for p in players) or players[0].blocks_or_blocked_by(players[1]):
+            raise DomainError("deep_not_allowed", "امکان شروع گفت‌وگوی عمیق با این بازیکن وجود ندارد.", 403)
+        category, max_intensity = "", 3
+        if not Prompt.objects.filter(type=PromptType.TRUTH, category__in=[Category.FUNNY, Category.BOLD],
+            is_active=True, review_status=PromptReviewStatus.APPROVED, intensity__lte=3, min_players__lte=2).exists():
+            raise DomainError("no_prompts", "هنوز سؤال خصوصی یا جسورانهٔ تأییدشده‌ای برای این حالت نداریم.", 409)
 
-    if active_session(conversation.id):
-        raise DomainError("game_running", "یک بازی در همین گفتگو در جریان است.", 409)
+    running = active_session(conversation.id)
+    if running:
+        if replace_session_id != running.pk:
+            raise DomainError("game_running", "یک بازی در جریان است؛ برای جایگزینی آن دوباره تأیید کن.", 409)
+    elif replace_session_id is not None:
+        raise DomainError("game_changed", "وضعیت بازی تغییر کرده؛ دوباره تلاش کن.", 409)
 
     player_ids = chat_services.participant_user_ids(conversation.id)
     if len(player_ids) < MIN_PLAYERS:
@@ -268,12 +306,15 @@ def start_game(
             "not_enough_players", "برای شروع بازی حداقل دو نفر لازم است.", 409
         )
 
+    if running:
+        end_game(running, "restarted")
     random.shuffle(player_ids)
 
     session = GameSession.objects.create(
         conversation=conversation,
         turn_order=player_ids,
         category=category,
+        play_mode=play_mode,
         max_intensity=max(1, min(3, max_intensity)),
         started_by=user,
     )
@@ -293,7 +334,7 @@ def start_game(
         player.record_play()
 
     chat_services.post_system_message(
-        conversation, "بازی شروع شد!", meta={"game": "started", "session_id": session.pk}
+        conversation, "گفت‌وگوی عمیق شروع شد؛ سؤال‌های خصوصی و جسورانه، با حق رد کردن هر سؤال 😉" if play_mode == "DEEP_TALK" else "بازی شروع شد!", meta={"game": "started", "session_id": session.pk, "play_mode": play_mode}
     )
     _open_turn(session)
     return session
@@ -307,6 +348,13 @@ def _open_turn(session: GameSession) -> Turn:
         index=session.turn_index,
         status=TurnStatus.CHOOSING,
     )
+    if session.play_mode == "DEEP_TALK":
+        try:
+            _assign_prompt(turn, PromptType.TRUTH)
+        except DomainError as error:
+            if error.code not in ("no_prompts", "prompts_exhausted"):
+                raise
+            chat_services.post_system_message(session.conversation, "سؤال‌های تازهٔ این گفت‌وگو تمام شد؛ می‌توانید چت را ادامه بدهید یا بازی جدیدی شروع کنید.")
     transaction.on_commit(lambda: _publish(session, turn))
     return turn
 
@@ -318,6 +366,14 @@ def choose(user: User, turn_id: int, choice: str) -> Turn:
     if choice not in (PromptType.TRUTH, PromptType.DARE):
         raise DomainError("bad_choice", "انتخاب نامعتبر است.")
 
+    if turn.session.play_mode == "DEEP_TALK" and choice != PromptType.TRUTH:
+        raise DomainError("bad_choice", "در گفت‌وگوی عمیق فقط سؤال مطرح می‌شود.")
+    _assign_prompt(turn, choice)
+    transaction.on_commit(lambda: _publish(turn.session, turn))
+    return turn
+
+
+def _assign_prompt(turn: Turn, choice: str) -> None:
     session = turn.session
     prompt = _pick_prompt(session, choice)
 
@@ -339,11 +395,11 @@ def choose(user: User, turn_id: int, choice: str) -> Turn:
             "player_id": turn.player_id,
             "choice": choice,
             "intensity": prompt.intensity,
+            "play_mode": session.play_mode,
+            "category": prompt.category,
         },
     )
 
-    transaction.on_commit(lambda: _publish(session, turn))
-    return turn
 
 
 @transaction.atomic
@@ -528,8 +584,8 @@ def stop_game(user: User, conversation_id) -> None:
     session = active_session(conversation_id)
     if session is None:
         raise DomainError("no_game", "بازی فعالی وجود ندارد.", 404)
-    if not is_owner(user, participant.conversation):
-        raise DomainError("not_room_owner", "فقط سازنده‌ی روم می‌تواند بازی را متوقف کند.", 403)
+    if not is_owner(user, participant.conversation) and not friend_pair(participant.conversation):
+        raise DomainError("not_room_owner", "فقط میزبان یا دوستت در چت دونفره می‌تواند بازی را متوقف کند.", 403)
     end_game(session, "stopped")
 
 

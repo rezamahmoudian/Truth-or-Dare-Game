@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 
 import { ApiError } from "@/lib/auth";
 import { faNum } from "@/lib/dates";
-import type { GameState, Prompt, PublicUser } from "@/lib/types";
+import type { GameState, PublicUser } from "@/lib/types";
+import { useSocial } from "@/store/social";
 import { EMPTY_GAME, useGame } from "@/store/game";
 import { Button } from "@/ui/Button";
 import { Skeleton } from "@/ui/Screen";
@@ -20,13 +21,19 @@ export function GamePanel({
   selfId,
   participants,
   isOwner,
+  hideStart = false,
+  pairChat = false,
 }: {
   conversationId: string;
   selfId: number;
   participants: PublicUser[];
   /** `null` while the conversation is still loading and nobody knows yet. */
   isOwner: boolean | null;
+  hideStart?: boolean;
+  pairChat?: boolean;
 }) {
+  const friends = useSocial(s => s.lists.friends);
+  const friendCanEnd = pairChat && participants.length === 2 && friends.some(friend => participants.some(p => p.id !== selfId && p.id === friend.id));
   const state: GameState =
     useGame((s) => s.byConversation[conversationId]) ?? EMPTY_GAME;
   const load = useGame((s) => s.load);
@@ -39,6 +46,7 @@ export function GamePanel({
   const turn = state.turn;
 
   if (!session || session.status === "ENDED") {
+    if (hideStart) return null;
     return (
       <StartBar
         conversationId={conversationId}
@@ -57,20 +65,20 @@ export function GamePanel({
 
   return (
     <div
-      className={`animate-rise border-t border-line-soft bg-gradient-to-b from-surface-2 to-surface px-3 py-3 ${
+      className={`chat-game-controls border-t border-line-soft px-3 ${
         isMine ? "turn-mine" : ""
       }`}
       // Keyed on the turn so the sweep replays when the turn becomes yours
       // again, instead of firing once for the life of the panel.
       key={`turn-${turn.id}`}
     >
-      <div className="mx-auto flex max-w-md flex-col gap-2.5">
-        <div className="flex items-center gap-2 text-[11px] text-faint">
+      <div className="mx-auto flex max-w-md flex-col">
+        <div className="game-compact-meta flex items-center gap-2 text-[11px] text-faint">
           {/* No progress bar and no "x of y": the game runs until somebody
               ends it, so there is nothing to be a fraction of. Counting up is
               the honest display. */}
           <span>
-            دور {faNum(session.round_number)} · نوبت {faNum(session.turn_index + 1)}
+            {session.play_mode === "DEEP_TALK" ? "گفت‌وگوی عمیق · " : ""}دور {faNum(session.round_number)} · {isMine ? "نوبت تو" : playerName}
           </span>
 
           {turn.status === "CONFIRMING" && turn.confirmations_required > 1 && (
@@ -80,25 +88,19 @@ export function GamePanel({
             </span>
           )}
 
-          {isOwner === true && (
+          {(isOwner === true || friendCanEnd) && (
             <span className="ms-auto">
               <EndGameButton conversationId={conversationId} />
             </span>
           )}
         </div>
 
-        {/* A reminder, not a second card. The real card is in the stream, and
-            two identical cards stacked on top of each other look like a bug —
-            but the stream scrolls, and it scrolls most while the answer is
-            being typed, so the question has to stay reachable somehow. */}
-        {turn.prompt && <PromptReminder prompt={turn.prompt} />}
-
         {/* Keyed on the status so the animation replays at each transition
             rather than only when the panel first appears. */}
-        <div key={turn.status} className="animate-swap-in">
+        <div key={turn.status} className="game-compact-actions">
           {turn.status === "CHOOSING" &&
             (isMine ? (
-              <ChooseRow turnId={turn.id} />
+              session.play_mode === "DEEP_TALK" ? <DeepQuestionRetry turnId={turn.id} /> : <ChooseRow turnId={turn.id} />
             ) : (
               <Waiting
                 text={`${playerName} در حال انتخاب است…`}
@@ -130,34 +132,6 @@ export function GamePanel({
 }
 
 /**
- * What the current turn is about, in one quiet line.
- *
- * Deliberately smaller, dimmer and left-aligned next to its badge, so it reads
- * as a label for the buttons underneath rather than competing with the card in
- * the stream that it is reminding you of.
- */
-function PromptReminder({ prompt }: { prompt: Prompt }) {
-  const dare = prompt.type === "DARE";
-  return (
-    <div
-      key={prompt.id}
-      className="animate-swap-in flex items-start gap-2 rounded-field bg-surface-3/50 px-3 py-2"
-    >
-      <span
-        className={`mt-px shrink-0 rounded-full px-2 py-0.5 text-[10px] font-extrabold ${
-          dare ? "bg-ok/20 text-ok" : "bg-brand/25 text-brand-soft"
-        }`}
-      >
-        {dare ? "جرئت" : "حقیقت"}
-      </span>
-      <p className="line-clamp-2 min-w-0 flex-1 text-[12.5px] leading-relaxed text-muted">
-        {prompt.text}
-      </p>
-    </div>
-  );
-}
-
-/**
  * Ends the game for everybody, so it asks first.
  *
  * Not destructive — every prompt and answer stays in the chat, and the room
@@ -174,7 +148,7 @@ function EndGameButton({ conversationId }: { conversationId: string }) {
       <button
         type="button"
         onClick={() => setConfirming(true)}
-        className="press surface-raised rounded-full px-2.5 py-1 text-[11px] text-faint"
+        className="game-end-button press min-h-11 rounded-full px-2.5 text-[11px] text-faint"
       >
         پایان بازی
       </button>
@@ -195,7 +169,7 @@ function EndGameButton({ conversationId }: { conversationId: string }) {
             setBusy(false);
           }
         }}
-        className="press rounded-full bg-bad px-2.5 py-1 text-[11px] font-bold text-white disabled:opacity-50"
+        className="game-end-confirm press rounded-full px-2.5 py-1 text-[11px] font-bold disabled:opacity-50"
       >
         آره
       </button>
@@ -296,21 +270,27 @@ function Waiting({
   const forceNext = useGame((s) => s.forceNext);
 
   return (
-    <div className="flex flex-col gap-2">
-      <p className="text-center text-[13px] text-muted">
-        <span className="animate-pulse-soft">⏳</span> {text}
+    <div className="game-status-row flex items-center justify-between gap-2">
+      <p className="text-[12px] text-muted">
+        {text}
       </p>
       {isOwner && (
         <button
           type="button"
           onClick={() => forceNext(turnId)}
-          className="py-1 text-[11.5px] text-faint underline-offset-4 hover:underline"
+          className="game-skip-button min-h-11 shrink-0 px-2 text-[11.5px] text-faint underline-offset-4 hover:underline"
         >
-          رد کن و برو نفر بعد
+          نفر بعد
         </button>
       )}
     </div>
   );
+}
+
+function DeepQuestionRetry({ turnId }: { turnId: number }) {
+  const choose = useGame(s => s.choose);
+  const error = useGame(s => s.choiceErrors[turnId]);
+  return <div className="text-center"><p className="text-xs text-muted">سؤال تازه‌ای نمانده؛ از بالای چت می‌تونی بازی جدید شروع کنی.</p><button type="button" className="min-h-11 text-xs text-brand-soft" onClick={() => choose(turnId, "TRUTH")}>بررسی سؤال تازه</button>{error && <p role="alert" className="text-xs text-bad">{error}</p>}</div>;
 }
 
 function ChooseRow({ turnId }: { turnId: number }) {
@@ -319,21 +299,20 @@ function ChooseRow({ turnId }: { turnId: number }) {
   const error = useGame((s) => s.choiceErrors[turnId]);
 
   return (
-    <div className="flex flex-col gap-2">
-      <p className="text-center text-[14px] font-bold">نوبت توئه — انتخاب کن</p>
+    <div className="flex flex-col gap-1">
       {error && <p role="alert" className="text-center text-[12px] leading-relaxed text-bad">{error}</p>}
-      <div className="flex gap-2">
+      <div className="game-choice-row flex items-center gap-2">
         <button
           type="button"
           onClick={() => choose(turnId, "TRUTH")}
-          className="press min-h-14 flex-1 rounded-field bg-gradient-to-b from-brand-soft to-brand text-[17px] font-extrabold text-white shadow-[0_8px_22px_-10px_var(--color-brand)]"
+          className="game-truth-button press min-h-11 flex-1 rounded-field text-[13px] font-bold"
         >
           حقیقت
         </button>
         <button
           type="button"
           onClick={() => choose(turnId, "DARE")}
-          className="press min-h-14 flex-1 rounded-field bg-gradient-to-b from-ok to-ok-deep text-[17px] font-extrabold text-white shadow-[0_8px_22px_-10px_var(--color-ok)]"
+          className="game-dare-button press min-h-11 flex-1 rounded-field text-[13px] font-bold"
         >
           جرئت
         </button>
@@ -341,9 +320,9 @@ function ChooseRow({ turnId }: { turnId: number }) {
       <button
         type="button"
         onClick={() => skip(turnId)}
-        className="py-1 text-[11.5px] text-faint"
+        className="game-skip-button min-h-11 shrink-0 self-center px-3 text-[11.5px] text-faint"
       >
-        رد کردن نوبت
+        رد نوبت
       </button>
     </div>
   );
@@ -353,13 +332,13 @@ function AnswerRow({ turnId }: { turnId: number }) {
   const skip = useGame((s) => s.skip);
   return (
     <div className="flex items-center justify-between gap-2">
-      <p className="text-[12px] text-muted">جوابت رو توی همین چت بفرست.</p>
+      <p className="text-[12px] text-muted">جوابت رو بنویس…</p>
       <button
         type="button"
         onClick={() => skip(turnId)}
-        className="min-h-11 shrink-0 rounded-field px-3 text-[12px] text-faint"
+        className="game-skip-button min-h-11 shrink-0 rounded-field px-3 text-[12px] text-faint"
       >
-        رد کردن نوبت
+        رد نوبت
       </button>
     </div>
   );
@@ -390,18 +369,17 @@ function ConfirmRow({
 
   if (isMine) {
     return (
-      <div className="flex flex-col gap-2">
-        <p className="text-center text-[13px] text-muted">
-          <span className="animate-pulse-soft">⏳</span> جواب دادی — منتظر تأیید
-          بقیه‌ایم.
+      <div className="game-status-row flex items-center justify-between gap-2">
+        <p className="text-[12px] text-muted">
+          منتظر تأیید پاسخ…
         </p>
         {isOwner && (
           <button
             type="button"
             onClick={() => forceNext(turnId)}
-            className="press surface-raised min-h-11 rounded-field text-[13px] font-bold"
+            className="game-skip-button press min-h-11 shrink-0 rounded-field px-3 text-[12px]"
           >
-            برو نفر بعد
+            نفر بعد
           </button>
         )}
       </div>
@@ -409,22 +387,22 @@ function ConfirmRow({
   }
 
   return (
-    <div className="flex flex-col gap-2">
-      <p className="text-center text-[14px] font-bold">{playerName} جواب داد؟</p>
-      <div className="flex gap-2">
+    <div className="game-confirm-row flex items-center gap-2">
+      <p className="min-w-0 flex-1 text-[12px] text-muted">تأیید پاسخ {playerName}</p>
+      <div className="flex shrink-0 gap-2">
         <button
           type="button"
           disabled={alreadyConfirmed}
           onClick={() => confirm(turnId)}
-          className="press min-h-12 flex-1 rounded-field bg-gradient-to-b from-ok to-ok-deep text-[16px] font-extrabold text-white shadow-[0_8px_22px_-10px_var(--color-ok)] disabled:opacity-50 disabled:shadow-none"
+          className="game-dare-button press min-h-11 rounded-field px-3 text-[12px] font-bold disabled:opacity-50"
         >
-          {alreadyConfirmed ? "تأیید کردی ✓" : "✓ آره، جواب داد"}
+          {alreadyConfirmed ? "تأیید شد ✓" : "تأیید پاسخ"}
         </button>
         {isOwner && (
           <button
             type="button"
             onClick={() => forceNext(turnId)}
-            className="press surface-raised min-h-12 rounded-field px-4 text-[13px] text-muted"
+            className="game-skip-button press min-h-11 rounded-field px-2 text-[12px] text-muted"
           >
             رد کن
           </button>

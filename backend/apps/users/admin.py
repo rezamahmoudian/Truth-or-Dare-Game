@@ -23,7 +23,7 @@ class UserAdmin(BaseUserAdmin):
     fieldsets = BaseUserAdmin.fieldsets + (
         (
             "پروفایل",
-            {"fields": ("display_name", "avatar", "bio", "gender", "birth_date", "age")},
+            {"fields": ("display_name", "avatar", "bio", "city", "interests", "gender", "birth_date", "age")},
         ),
         (
             "حساب مهمان",

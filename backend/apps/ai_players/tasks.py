@@ -8,9 +8,10 @@ from django.db import transaction
 from django.utils import timezone
 
 from apps.chat import services as chat
-from apps.chat.models import Conversation
+from apps.chat.models import Conversation, Message, MessageType
 from apps.core.errors import DomainError
 from apps.game import services as game
+from apps.game.models import TurnStatus
 
 from . import client, services
 from .models import AIConversation, AIRequest
@@ -32,6 +33,7 @@ def recover_pending():
     if services.available():
         for conversation_id in services.pending_ids():
             services.dispatch(conversation_id)
+        services.recover_silent_confirmations()
 
 
 def _load(conversation_id):
@@ -94,6 +96,7 @@ def respond(conversation_id):
         revision = state.revision
         persona = state.persona
         persona_version = persona.updated_at
+        allowed_actions = tuple(context.get("allowed_actions") or (action,))
         request = AIRequest.objects.create(conversation=state, revision=revision, model=settings.OPENAI_MODEL)
 
     # No database transaction/row lock is held while waiting for GPT.
@@ -112,14 +115,19 @@ def respond(conversation_id):
                 return
             state.conversation = Conversation.objects.select_for_update().get(pk=conversation_id)
             fresh_action, fresh_signature, fresh_context = services.snapshot(state)
+            fresh_allowed_actions = tuple(fresh_context.get("allowed_actions") or (fresh_action,))
             # A late network response must not answer a skipped turn, continue a
             # closed room or speak with an outdated persona definition.
             stale = (not services.valid(state) or state.revision != revision or signature != fresh_signature
-                     or action != fresh_action or state.persona.updated_at != persona_version
+                     or action != fresh_action
+                     or allowed_actions != fresh_allowed_actions
+                     or reply.get("action") not in allowed_actions
+                     or state.persona.updated_at != persona_version
                      or context["latest_message_id"] != fresh_context["latest_message_id"])
             deliver_at = timezone.now() + timedelta(seconds=reply_delay_seconds(reply))
             payload = {} if stale else {
                 "reply": reply, "signature": list(signature) if signature else None,
+                "allowed_actions": list(allowed_actions),
                 "latest_message_id": context["latest_message_id"],
                 "persona_version": persona_version.isoformat(), "lease": str(token),
             }
@@ -169,15 +177,25 @@ def deliver(request_id):
                 state.conversation = Conversation.objects.select_for_update().get(pk=conversation_id)
                 action, signature, context = services.snapshot(state)
                 signature = list(signature) if signature else None
+                allowed_actions = tuple(context.get("allowed_actions") or (action,))
                 stale = (not services.valid(state) or state.revision != request.revision
-                         or signature != payload["signature"] or action != payload["reply"]["action"]
+                         or signature != payload["signature"]
+                         or tuple(payload.get("allowed_actions") or (payload["reply"]["action"],)) != allowed_actions
+                         or payload["reply"]["action"] not in allowed_actions
                          or context["latest_message_id"] != payload["latest_message_id"]
                          or state.persona.updated_at.isoformat() != payload["persona_version"])
                 if not stale:
-                    _apply(state, payload["reply"], signature, request.pk)
+                    applied_message = _apply(state, payload["reply"], signature, request.pk)
                     state.handled_revision = request.revision
                     state.failures = 0
                     state.last_error = ""
+                    if payload["reply"]["action"] == "chat" and applied_message is not None:
+                        transaction.on_commit(
+                            lambda conversation_id=conversation_id, revision=request.revision,
+                            message_id=applied_message.pk: services.schedule_silence_continuation(
+                                conversation_id, revision, message_id
+                            )
+                        )
                 state.lease = state.lease_until = state.retry_at = None
                 state.save(update_fields=["handled_revision", "failures", "last_error", "lease", "lease_until", "retry_at"])
                 if stale:
@@ -189,6 +207,34 @@ def deliver(request_id):
     except DomainError as exc:
         _failed(conversation_id, uuid.UUID(payload["lease"]), request_id,
                 request.revision, exc.code, False)
+
+
+@shared_task(ignore_result=True)
+def continue_after_silence(conversation_id, revision, message_id):
+    """Confirm an AI player's chat turn only when the human stayed silent."""
+    with transaction.atomic():
+        state = _load(conversation_id)
+        if not state or state.revision != int(revision) or state.handled_revision != int(revision):
+            return
+        # Serialize against a message being written at the same moment. Chat
+        # writes lock this conversation row before their revision notification.
+        state.conversation = Conversation.objects.select_for_update().get(pk=conversation_id)
+        if not services.valid(state):
+            return
+        session = game.active_session(conversation_id)
+        turn = game.current_turn(session) if session else None
+        if not turn or turn.status != TurnStatus.CONFIRMING or turn.player_id != state.human_id:
+            return
+        message = Message.objects.filter(
+            pk=message_id, conversation_id=conversation_id,
+            sender_id=state.persona.user_id, type=MessageType.TEXT, is_deleted=False,
+        ).first()
+        if not message or Message.objects.filter(
+            conversation_id=conversation_id, sender_id=state.human_id,
+            id__gt=message.id, is_deleted=False,
+        ).exists():
+            return
+        game.confirm(state.persona.user, turn.pk)
 
 
 def _apply(state, reply, signature, request_id):
@@ -210,10 +256,17 @@ def _apply(state, reply, signature, request_id):
     elif action == "answer":
         game.answer(actor, signature[0], reply["text"])
     else:
-        chat.post_message(conversation=state.conversation, sender=actor, body=reply["text"],
-                          client_id=f"ai-{request_id.hex}", meta={"ai_generated": True})
+        # A confirmation is an internal game transition. The model may add a
+        # short closing line, but an empty text keeps the action silent.
+        message = None
+        if action == "chat" or reply["text"].strip():
+            message, _ = chat.post_message(
+                conversation=state.conversation, sender=actor, body=reply["text"],
+                client_id=f"ai-{request_id.hex}", meta={"ai_generated": True}
+            )
         if action == "confirm":
             game.confirm(actor, signature[0])
+        return message
 
 
 def _failed(conversation_id, token, request_id, revision, code, retryable):

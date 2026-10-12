@@ -110,4 +110,5 @@ class InvitationTests(TestCase):
         self.assertEqual(first.status_code, 200)
         self.assertEqual(first.data["conversation_id"], second.data["conversation_id"])
         self.assertEqual(social.relation_to(self.a, self.b), "FRIENDS")
-        self.assertEqual(Conversation.objects.filter(type="DIRECT").count(), 1)
+        self.assertIsNone(first.data["conversation_id"])
+        self.assertFalse(Conversation.objects.exists())

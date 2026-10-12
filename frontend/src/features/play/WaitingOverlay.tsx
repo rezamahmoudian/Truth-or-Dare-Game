@@ -15,8 +15,23 @@ import { Button } from "@/ui/Button";
  */
 export function WaitingOverlay({ ticket, title }: { ticket: MatchTicket; title: string }) {
   const cancel = useMatch((s) => s.cancel);
+  const resume = useMatch((s) => s.resume);
   const [elapsed, setElapsed] = useState(ticket.waited_seconds);
   const [cancelling, setCancelling] = useState(false);
+
+  useEffect(() => {
+    let stopped = false;
+    let timer: number;
+    const check = async () => {
+      try { if (document.visibilityState === "visible") await resume(); }
+      catch { /* Socket reconnect and the next check both retry. */ }
+      if (!stopped) timer = window.setTimeout(() => void check(), 5000);
+    };
+    timer = window.setTimeout(() => void check(), 5000);
+    const visible = () => { if (document.visibilityState === "visible") void resume().catch(() => undefined); };
+    document.addEventListener("visibilitychange", visible);
+    return () => { stopped = true; window.clearTimeout(timer); document.removeEventListener("visibilitychange", visible); };
+  }, [resume]);
 
   useEffect(() => {
     setElapsed(ticket.waited_seconds);

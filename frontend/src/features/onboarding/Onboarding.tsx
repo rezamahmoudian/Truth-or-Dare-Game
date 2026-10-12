@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-import { ApiError } from "@/lib/auth";
+import { clearTokens, ApiError } from "@/lib/auth";
 import {
   currentJalaliYear,
   daysInJalaliMonth,
@@ -19,7 +19,7 @@ const MIN_AGE = 18;
  * Three steps, each saved as it completes.
  *
  * Saving per step rather than all at once matters here: the account already
- * exists (the guest sign-in created it before this screen rendered), so a
+ * exists (registration created it before this screen rendered), so a
  * person who drops out halfway and comes back resumes where they stopped
  * instead of starting over.
  */
@@ -59,6 +59,7 @@ export function Onboarding() {
 
   return (
     <div className="flex h-[100dvh] flex-col">
+      <button type="button" className="mx-auto mt-3 min-h-11 px-4 text-xs text-brand-soft" disabled={busy} onClick={() => { clearTokens(); window.location.assign("/"); }}>از قبل حساب داری؟ ورود به حساب دیگر</button>
       <ProgressBar step={step} total={3} onBack={step > 0 ? () => setStep(step - 1) : undefined} />
 
       <div className="flex-1 overflow-y-auto overscroll-contain px-5 py-6">

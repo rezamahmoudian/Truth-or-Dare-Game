@@ -71,6 +71,7 @@ function wave() {
     assert.ok(await first.locator("audio").evaluate(a => a.currentTime) > 3);
     const progress = await first.locator("clipPath rect").getAttribute("width");
     assert.ok(Number(progress) > 90 && Number(progress) < 120);
+    await first.getByRole("button", { name: "گزینه‌های وویس", exact: true }).click();
     await first.getByRole("button", { name: "سرعت پخش 1 برابر؛ تغییر سرعت", exact: true }).click();
     assert.equal(await first.locator("audio").evaluate(a => a.playbackRate), 1.5);
     console.log("PASS decoded waveform, progress fill, seek, keyboard seek, playback speed");

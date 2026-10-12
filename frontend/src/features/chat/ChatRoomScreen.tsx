@@ -1,9 +1,13 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 
 import { PlayersSheet } from "@/features/chat/PlayersSheet";
 import { AttachmentView } from "@/features/chat/Attachments";
 import { AttachmentComposer } from "@/features/chat/AttachmentComposer";
+import { ChatIcon } from "./ChatDecor";
+import { ChatGameLauncher } from "./ChatGameLauncher";
+import { ChatPlayCard } from "./ChatPlayCard";
+import { Emoji, EmojiText } from "./Emoji";
 import { GamePanel } from "@/features/game/GamePanel";
 import { ReportSheet } from "@/features/moderation/ReportSheet";
 import * as api from "@/lib/chatApi";
@@ -13,6 +17,7 @@ import type { AnyMessage, Conversation } from "@/lib/types";
 import { isPending } from "@/lib/types";
 import { typingUserIds, useChat } from "@/store/chat";
 import { useSession } from "@/store/session";
+import { useInvitations } from "@/store/invitations";
 import { Avatar } from "@/ui/Avatar";
 import { Screen, Skeleton } from "@/ui/Screen";
 
@@ -49,9 +54,12 @@ export function ChatRoomScreen() {
   const openConversation = useChat((s) => s.openConversation);
   const closeConversation = useChat((s) => s.closeConversation);
   const loadOlder = useChat((s) => s.loadOlder);
+  const loadInvitations = useInvitations(s => s.load);
 
   const [conversation, setConversation] = useState<Conversation | null>(null);
   const [showPlayers, setShowPlayers] = useState(false);
+  const [showMenu, setShowMenu] = useState(false);
+  useEffect(() => { void loadInvitations().catch(() => undefined); }, [loadInvitations]);
 
   useEffect(() => {
     void openConversation(id);
@@ -77,8 +85,8 @@ export function ChatRoomScreen() {
   const other = conversation?.participants.find((p) => p.id !== me?.id);
   const ai = conversation?.participants.find((p) => p.is_ai);
   const title =
-    ai ? ai.display_name : conversation?.type === "ROOM"
-      ? `روم ${conversation.code ?? ""}`
+    ai ? ai.display_name : conversation && conversation.max_players > 2
+      ? `جمع ${conversation.code ?? "دوستان"}`
       : (other?.display_name ?? "گفتگو");
 
   const subtitle =
@@ -87,20 +95,22 @@ export function ChatRoomScreen() {
       : ai ? (isClosed ? "گفتگو بسته شده" : "گفتگو و بازی")
       : typingIds.length > 0
         ? "در حال نوشتن…"
-        : `${faNum(online.length)} نفر آنلاین`;
+        : conversation && conversation.max_players > 2 ? `${faNum(online.length)} نفر آنلاین`
+        : other && online.includes(other.id) ? "آنلاین" : "آفلاین";
 
   return (
     <Screen
+      className="chat-screen chat-room"
       scroll={false}
       header={
         <header
-          className="chat-header bar-blur flex shrink-0 items-center gap-1 border-b border-line-soft px-2 pb-2.5"
+          className="chat-header bar-blur flex shrink-0 flex-wrap items-center gap-1 border-b border-line-soft px-3 pb-2.5"
           style={{ paddingTop: "max(0.625rem, env(safe-area-inset-top))" }}
         >
           <button
             type="button"
             onClick={() => navigate("/chats")}
-            className="press grid size-10 shrink-0 place-items-center rounded-full text-muted"
+            className="press grid size-11 shrink-0 place-items-center rounded-full text-muted"
             aria-label="بازگشت"
           >
             <BackChevron />
@@ -110,14 +120,13 @@ export function ChatRoomScreen() {
               tap that turns a finished game into a friend request. */}
           <button
             type="button"
-            onClick={() => setShowPlayers(true)}
+            onClick={() => { if (other && conversation && conversation.max_players === 2) navigate(`/people/${other.id}`); else setShowPlayers(true); }}
             className="press flex min-w-0 flex-1 items-center gap-2.5 rounded-field py-1 text-start"
           >
             <Avatar
               photoUrl={other?.avatar_url} avatarKey={other?.avatar || "a1"}
               name={title}
               size={38}
-              glow
             />
             <span className="min-w-0">
               <span className="block truncate text-[16px] font-bold leading-tight">
@@ -125,7 +134,7 @@ export function ChatRoomScreen() {
               </span>
               <span
                 className={`block truncate text-[12px] leading-tight ${
-                  typingIds.length > 0 ? "text-ok" : "text-faint"
+                  typingIds.length > 0 || (other && online.includes(other.id)) ? "text-ok" : "text-faint"
                 }`}
               >
                 {subtitle}
@@ -133,14 +142,18 @@ export function ChatRoomScreen() {
             </span>
           </button>
 
+          <ChatGameLauncher key={id} conversation={conversation} selfId={me?.id ?? 0} />
+          <button type="button" className="chat-header-more grid size-11 shrink-0 place-items-center rounded-full" aria-label="گزینه‌های گفتگو" aria-expanded={showMenu} onClick={() => setShowMenu(v => !v)}><ChatIcon name="more" /></button>
+          {showMenu && <div className="chat-room-menu flex w-full flex-wrap items-center gap-2 p-2">
+          <button type="button" className="min-h-11 rounded-field px-3 text-sm" onClick={() => { setShowPlayers(true); setShowMenu(false); }}>دیدن پروفایل بازیکن‌ها</button>
           {conversation?.code && !isClosed && <CopyCode code={conversation.code} />}
-
           {isOwner && !isClosed && (
             <CloseRoomButton
               conversationId={id}
               onClosed={(updated) => setConversation(updated)}
             />
           )}
+          </div>}
         </header>
       }
       footer={
@@ -149,6 +162,8 @@ export function ChatRoomScreen() {
         ) : (
           <>
             <GamePanel
+              pairChat={conversation?.max_players === 2}
+              hideStart
               conversationId={id}
               selfId={me?.id ?? 0}
               participants={conversation?.participants ?? []}
@@ -168,6 +183,8 @@ export function ChatRoomScreen() {
         selfId={me?.id ?? 0}
         conversationId={id}
         onReachTop={() => void loadOlder(id)}
+        groupChat={(conversation?.max_players ?? 2) > 2}
+        playCard={<ChatPlayCard key={id} conversation={conversation} selfId={me?.id ?? 0} />}
       />
 
       {showPlayers && (
@@ -218,7 +235,7 @@ function CloseRoomButton({
       <button
         type="button"
         onClick={() => setConfirming(true)}
-        className="press surface-raised shrink-0 rounded-field px-2.5 py-1.5 text-[11.5px] text-faint"
+        className="press surface-raised min-h-11 shrink-0 rounded-field px-2.5 py-1.5 text-[11.5px] text-faint"
       >
         بستن
       </button>
@@ -277,7 +294,7 @@ function CopyCode({ code }: { code: string }) {
           window.setTimeout(() => setCopied(false), 1500);
         });
       }}
-      className="press surface-raised shrink-0 rounded-field px-2.5 py-1.5 font-mono text-[12px] tracking-[0.2em] text-muted"
+      className="press surface-raised min-h-11 shrink-0 rounded-field px-2.5 py-1.5 font-mono text-[12px] tracking-[0.2em] text-muted"
       dir="ltr"
       aria-label="کپی کد روم"
     >
@@ -292,15 +309,20 @@ function MessageList({
   selfId,
   conversationId,
   onReachTop,
+  groupChat,
+  playCard,
 }: {
   messages: AnyMessage[];
   loading: boolean;
   selfId: number;
   conversationId: string;
   onReachTop: () => void;
+  groupChat: boolean;
+  playCard: import("react").ReactNode;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const pinnedToBottom = useRef(true);
+  const previousViewportHeight = useRef(0);
 
   useLayoutEffect(() => {
     const element = scrollRef.current;
@@ -308,6 +330,37 @@ function MessageList({
     // yanking them down while they read history is worse than a missed scroll.
     if (element && pinnedToBottom.current) element.scrollTop = element.scrollHeight;
   }, [messages.length]);
+
+  // Invitations and media may grow after the messages have loaded. Follow
+  // their size only while the reader is already at the end of the chat.
+  useLayoutEffect(() => {
+    const element = scrollRef.current;
+    const content = element?.firstElementChild;
+    if (!element || !content) return;
+
+    // A mobile keyboard changes the height of the internal scroller. If the
+    // conversation previously fit in the available space, keep its top edge
+    // anchored instead of letting the browser preserve a bottom offset and
+    // push the first messages above the viewport. Once the list was already
+    // scrollable, normal bottom-following behaviour remains unchanged.
+    previousViewportHeight.current = element.clientHeight;
+    const observer = new ResizeObserver(() => {
+      const before = previousViewportHeight.current;
+      const heightChanged = before > 0 && before !== element.clientHeight;
+      const contentPreviouslyFit = element.scrollHeight <= before + 1;
+
+      if (heightChanged && contentPreviouslyFit) {
+        element.scrollTop = 0;
+      } else if (pinnedToBottom.current) {
+        element.scrollTop = element.scrollHeight;
+      }
+
+      previousViewportHeight.current = element.clientHeight;
+    });
+    observer.observe(element);
+    observer.observe(content);
+    return () => observer.disconnect();
+  }, [loading]);
 
   function onScroll() {
     const element = scrollRef.current;
@@ -327,6 +380,7 @@ function MessageList({
       className="chat-message-list h-full overflow-y-auto overscroll-contain px-3 py-4"
     >
       <div className="mx-auto flex max-w-md flex-col">
+        {playCard}
         {messages.map((message, index) => {
           const previous = messages[index - 1];
           const newDay =
@@ -349,6 +403,7 @@ function MessageList({
                 selfId={selfId}
                 conversationId={conversationId}
                 grouped={sameAuthor}
+                groupChat={groupChat}
               />
             </div>
           );
@@ -365,12 +420,10 @@ function authorOf(message: AnyMessage, selfId: number): number {
 
 function DayDivider({ iso }: { iso: string }) {
   return (
-    <div className="my-3 flex items-center gap-3" role="separator">
-      <span className="h-px flex-1 bg-line-soft" />
-      <span className="rounded-full bg-surface-2 px-3 py-1 text-[11px] text-faint">
+    <div className="chat-day-divider my-3 flex justify-center" role="separator">
+      <span className="px-3 py-1 text-[11px] text-faint">
         {dayLabel(iso)}
       </span>
-      <span className="h-px flex-1 bg-line-soft" />
     </div>
   );
 }
@@ -401,11 +454,13 @@ function MessageRow({
   selfId,
   conversationId,
   grouped,
+  groupChat,
 }: {
   message: AnyMessage;
   selfId: number;
   conversationId: string;
   grouped: boolean;
+  groupChat: boolean;
 }) {
   const [showActions, setShowActions] = useState(false);
   const [reporting, setReporting] = useState(false);
@@ -428,7 +483,7 @@ function MessageRow({
     const isDare = message.meta?.choice === "DARE";
     return (
       // The one card in the app that is literally a card being turned over.
-      <div className="animate-card-in my-3">
+      <div className="chat-question-card animate-card-in my-3">
         <div
           className={`relative overflow-hidden rounded-card border p-4 text-center ${
             isDare
@@ -441,7 +496,7 @@ function MessageRow({
               isDare ? "bg-ok/20 text-ok" : "bg-brand/25 text-brand-soft"
             }`}
           >
-            {isDare ? "جرئت" : "حقیقت"}
+            {message.meta.play_mode === "DEEP_TALK" ? (message.meta.category === "BOLD" ? "جسورانه 😏" : "خصوصی 🤫") : isDare ? "جرئت" : "حقیقت"}
           </span>
           <p className="text-[16px] font-semibold leading-relaxed">{message.body}</p>
         </div>
@@ -456,32 +511,36 @@ function MessageRow({
 
   return (
     <div
+      dir="ltr"
+      data-mine={mine}
       className={`chat-message-row animate-rise flex gap-2 ${grouped ? "mt-0.5" : "mt-2.5"} ${
-        mine ? "flex-row-reverse" : ""
+        mine ? "justify-end" : "justify-start"
       }`}
     >
-      {!mine &&
+      {groupChat && !mine &&
         (grouped ? (
           <span className="w-8 shrink-0" aria-hidden />
         ) : (
+          <Link to={`/people/${message.sender?.id}`} aria-label={`پروفایل ${message.sender?.display_name ?? "بازیکن"}`}>
           <Avatar
             photoUrl={message.sender?.avatar_url} avatarKey={message.sender?.avatar || "a1"}
             name={message.sender?.display_name ?? ""}
             size={32}
           />
+          </Link>
         ))}
 
-      <div className={`flex max-w-[78%] flex-col ${mine ? "items-end" : "items-start"}`}>
-        {!mine && !grouped && message.sender && (
-          <span className="mb-0.5 px-1 text-[11.5px] font-semibold text-muted">
+      <div dir="rtl" className={`chat-message-content flex max-w-[85%] min-w-0 flex-col ${mine ? "items-end" : "items-start"}`}>
+        {groupChat && !mine && !grouped && message.sender && (
+          <Link to={`/people/${message.sender.id}`} className="mb-0.5 px-1 text-[11.5px] font-semibold text-muted">
             {message.sender.display_name}
-          </span>
+          </Link>
         )}
 
-        {message.attachment && !message.is_deleted && <div className="chat-attachment surface-raised mb-1 w-full rounded-card p-3">
+        {message.attachment && !message.is_deleted && <div className="chat-attachment surface-raised w-full rounded-card p-3">
           <AttachmentView attachment={message.attachment} />
         </div>}
-        <button
+        {(message.body || message.is_deleted || !message.attachment) && <button
           type="button"
           onClick={() => setShowActions((open) => !open)}
           className={`chat-bubble press whitespace-pre-wrap break-words px-3.5 py-2 text-start text-[15px] leading-relaxed ${
@@ -497,16 +556,11 @@ function MessageRow({
             message.is_deleted ? "italic opacity-50" : ""
           }`}
         >
-          {message.is_deleted ? "پیام حذف شد" : message.body || (message.attachment ? "گزینه‌های پیام ⋯" : "")}
-        </button>
+          <span>{message.is_deleted ? "پیام حذف شد" : <EmojiText text={message.body} />}</span>
+          <span className="chat-bubble-time block" dir="ltr">{pending ? "در حال ارسال…" : clockTime(message.created_at)}{mine && !pending && !failed && <span className="ms-1" aria-label="ارسال شده">✓</span>}</span>
+        </button>}
 
-        <span
-          className={`mt-0.5 px-1 text-[10.5px] tabular-nums text-faint ${
-            grouped ? "sr-only" : ""
-          }`}
-        >
-          {pending ? "در حال ارسال…" : clockTime(message.created_at)}
-        </span>
+        {message.attachment && !message.is_deleted && <div className="chat-attachment-meta flex w-full items-center justify-between text-[10.5px] text-faint"><span>{pending ? "در حال ارسال…" : clockTime(message.created_at)}</span><button type="button" className="grid size-11 place-items-center rounded-full" aria-label="گزینه‌های پیام" aria-expanded={showActions} onClick={() => setShowActions(v => !v)}><ChatIcon name="more" /></button></div>}
 
         {failed && (
           <button
@@ -534,7 +588,7 @@ function MessageRow({
                     : "bg-surface-2"
                 }`}
               >
-                {emoji} {faNum(users.length)}
+                <Emoji value={emoji} /> {faNum(users.length)}
               </button>
             ))}
           </div>
@@ -557,7 +611,7 @@ function MessageRow({
                 }}
                 className="press px-1 text-[19px]"
               >
-                {emoji}
+                <Emoji value={emoji} />
               </button>
             ))}
 
@@ -637,6 +691,10 @@ function Composer({ conversationId }: { conversationId: string }) {
     sendMessage(conversationId, text);
     setText("");
     if (areaRef.current) areaRef.current.style.height = "auto";
+    // Tapping the send button moves focus to the button, which closes the
+    // mobile keyboard. Restore focus on the next frame so a person can keep
+    // sending several messages without reopening it each time.
+    requestAnimationFrame(() => areaRef.current?.focus({ preventScroll: true }));
     typingSentAt.current = 0;
     setTyping(conversationId, false);
   }
@@ -646,7 +704,13 @@ function Composer({ conversationId }: { conversationId: string }) {
       className="chat-composer-bar bar-blur shrink-0 border-t border-line-soft px-3 py-2"
       style={{ paddingBottom: "max(0.5rem, env(safe-area-inset-bottom))" }}
     >
-      <AttachmentComposer key={conversationId} conversationId={conversationId} hasText={!!text.trim()} onSendText={submit}>
+      <AttachmentComposer key={conversationId} conversationId={conversationId} hasText={!!text.trim()} onSendText={submit} onInsertEmoji={emoji => {
+        const area = areaRef.current;
+        const begin = area?.selectionStart ?? text.length;
+        const end = area?.selectionEnd ?? text.length;
+        onChange(text.slice(0, begin) + emoji + text.slice(end));
+        requestAnimationFrame(() => { area?.focus(); area?.setSelectionRange(begin + emoji.length, begin + emoji.length); });
+      }}>
         <textarea
           ref={areaRef}
           value={text}
@@ -659,7 +723,7 @@ function Composer({ conversationId }: { conversationId: string }) {
           }}
           rows={1}
           aria-label="متن پیام"
-          placeholder="پیام…"
+          placeholder="پیامت رو بنویس…"
           className="max-h-32 min-h-12 min-w-0 flex-1 resize-none rounded-[1.6rem] bg-transparent py-3 ps-1 pe-4 text-[14px] outline-none placeholder:text-faint focus-visible:ring-1 focus-visible:ring-brand/60"
         />
       </AttachmentComposer>

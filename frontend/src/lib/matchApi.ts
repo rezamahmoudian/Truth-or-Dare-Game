@@ -6,8 +6,8 @@ export const getLobby = () => authFetch<Lobby>("/lobby/");
 
 export const listModes = () => authFetch<MatchMode[]>("/match-modes/");
 
-export const getMatchStatus = () =>
-  authFetch<MatchTicket | { state: "IDLE" }>("/match/");
+export const getMatchStatus = (ticketId?: number) =>
+  authFetch<MatchTicket | { state: "IDLE" }>(ticketId ? `/match/?ticket_id=${ticketId}` : "/match/");
 
 export const enqueue = (mode: string, aiConsent = false) =>
   authFetch<MatchTicket>("/match/", {

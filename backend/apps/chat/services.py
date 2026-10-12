@@ -224,6 +224,8 @@ def join_by_code(user: User, code: str) -> tuple[Conversation, bool]:
 def leave(user: User, conversation: Conversation) -> None:
     conversation = Conversation.objects.select_for_update().get(pk=conversation.pk)
     participant = active_participant(user, conversation.id)
+    from apps.matchmaking.quota import close_pending
+    close_pending(conversation.pk)
     participant.left_at = timezone.now()
     participant.save(update_fields=["left_at"])
 
@@ -252,35 +254,62 @@ def leave(user: User, conversation: Conversation) -> None:
     game_services.on_participant_left(conversation.id, user.pk)
 
 
+def pair_conversations(a: User, b: User):
+    """Only genuine two-person histories; never reuse a former group."""
+    ids = Conversation.objects.annotate(member_count=Count("participants")).filter(
+        member_count=2,
+    ).filter(Q(type=ConversationType.DIRECT) | Q(max_players=2)).values("pk")
+    return Conversation.objects.filter(pk__in=ids).filter(
+        participants__user=a,
+    ).filter(participants__user=b).order_by(F("last_message_at").desc(nulls_last=True), "-created_at")
+
+
 @transaction.atomic
-def get_or_create_direct(a: User, b: User) -> Conversation:
-    """The private conversation between two people, created once.
-
-    Idempotent on purpose: friendship can be accepted from two devices at once,
-    and two DIRECT conversations for the same pair would silently split their
-    history in half.
-    """
-    existing = (
-        Conversation.objects.filter(type=ConversationType.DIRECT)
-        .filter(participants__user=a)
-        .filter(participants__user=b)
-        .first()
-    )
-    if existing:
-        return existing
-
-    conversation = Conversation.objects.create(
-        type=ConversationType.DIRECT,
-        status=ConversationStatus.ACTIVE,
-        max_players=2,
-    )
-    Participant.objects.bulk_create(
-        [
+def get_or_create_pair(a: User, b: User, *, room=False, preferred_id=None) -> Conversation:
+    # All entry points take the same ordered lock, including simultaneous
+    # invitations, matchmaking and opening a friend's chat.
+    list(User.objects.select_for_update().filter(pk__in=[a.pk, b.pk]).order_by("pk"))
+    if a.pk == b.pk or a.blocks_or_blocked_by(b):
+        raise DomainError("blocked", "امکان ارتباط با این کاربر وجود ندارد.", 403)
+    candidates = pair_conversations(a, b)
+    if preferred_id is not None:
+        from uuid import UUID
+        try:
+            preferred_id = UUID(str(preferred_id))
+        except (ValueError, TypeError):
+            raise DomainError("invalid_conversation", "گفتگو نامعتبر است.", 400)
+        candidates = candidates.filter(pk=preferred_id)
+    conversation = candidates.select_for_update().first()
+    if preferred_id is not None and conversation is None:
+        raise DomainError("invalid_conversation", "این گفتگو متعلق به این دو بازیکن نیست.", 403)
+    if conversation is None:
+        conversation = Conversation.objects.create(
+            type=ConversationType.ROOM if room else ConversationType.DIRECT,
+            status=ConversationStatus.ACTIVE, max_players=2,
+            owner=a if room else None,
+            code=Conversation.generate_code() if room else None,
+        )
+        Participant.objects.bulk_create([
             Participant(conversation=conversation, user=a),
             Participant(conversation=conversation, user=b),
-        ]
-    )
+        ])
+    else:
+        conversation.status = ConversationStatus.ACTIVE
+        if conversation.type == ConversationType.ROOM and conversation.owner_id not in [a.pk, b.pk]:
+            conversation.owner = a
+        conversation.save(update_fields=["status", "owner"])
+        # Keep read/clear cursors: reopening must not restore deleted messages.
+        conversation.participants.update(left_at=None)
+        conversation.participants.filter(user=a).update(hidden_at=None)
+        payload = conversation_payload(conversation, participants=participants_of(conversation.pk))
+        transaction.on_commit(lambda: broadcast.to_users([a.pk, b.pk], "conv.updated", payload))
     return conversation
+
+
+@transaction.atomic
+def get_or_create_direct(a: User, b: User) -> Conversation:
+    """Open their existing two-person history, regardless of how it began."""
+    return get_or_create_pair(a, b)
 
 
 @transaction.atomic
@@ -301,6 +330,8 @@ def close_room(user: User, conversation: Conversation) -> Conversation:
 
     active_participant(user, conversation.id)
 
+    from apps.matchmaking.quota import close_pending
+    close_pending(conversation.pk)
     conversation.status = ConversationStatus.CLOSED
     conversation.save(update_fields=["status"])
 
@@ -341,7 +372,10 @@ def delete_for_me(user: User, conversation: Conversation) -> None:
     should stop involving you, and you kept the code if you want back in. A
     private chat only hides, so the other person can still reach you.
     """
+    conversation = Conversation.objects.select_for_update().get(pk=conversation.pk)
     participant = active_participant(user, conversation.id)
+    from apps.matchmaking.quota import close_pending
+    close_pending(conversation.pk)
 
     last_id = (
         Message.objects.filter(conversation=conversation)
@@ -401,10 +435,11 @@ def post_message(
     way.
     """
     answer_turn = None
+    if sender is not None:
+        conversation = Conversation.objects.select_for_update().get(pk=conversation.pk)
     if sender is not None and message_type == MessageType.TEXT:
         # Game transitions lock this same row. Resolve the turn on the server,
         # so stale clients and simultaneous sends cannot answer twice.
-        conversation = Conversation.objects.select_for_update().get(pk=conversation.pk)
         if client_id:
             existing = Message.objects.filter(conversation=conversation, client_id=client_id).first()
             if existing is not None:
@@ -496,6 +531,9 @@ def post_message(
     )
     conversation.last_message_at = message.created_at
     conversation.last_message_preview = _preview_for(message)
+
+    from apps.matchmaking.quota import record_message
+    record_message(message)
 
     # A message created a millisecond ago cannot have reactions yet. Saying so
     # here spares `message_payload` a SELECT on the busiest path in the app.
