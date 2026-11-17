@@ -528,6 +528,39 @@ class AIPlayerTests(TestCase):
         AIConversation.objects.filter(pk=state.pk).update(lease_until=timezone.now() - timedelta(seconds=1))
         self.assertIn(state.pk, list(services.pending_ids()))
 
+    @override_settings(AI_PROVIDER="anthropic", ANTHROPIC_AUTH_TOKEN="test-only",
+                       ANTHROPIC_MODEL="test-model", ANTHROPIC_BASE_URL="https://gateway.example")
+    def test_incomplete_response_is_retried_and_delivered_once(self):
+        state = self.matched()
+        action, _, _ = services.snapshot(state)
+        good = {"stop_reason": "tool_use", "content": [{
+            "type": "tool_use", "name": "game_reply",
+            "input": {"action": action, "text": "سلام", "choice": "TRUTH"},
+        }]}
+        with patch("apps.ai_players.client.urlopen") as http:
+            http.return_value.__enter__.return_value.read.side_effect = [
+                json.dumps({"stop_reason": "max_tokens"}).encode(), json.dumps(good).encode(),
+            ]
+            tasks.respond(str(state.pk))
+            state.refresh_from_db()
+            self.assertLess(state.handled_revision, state.revision)
+            self.assertIsNotNone(state.retry_at)
+            self.assertEqual(state.last_error, "incomplete_response")
+            AIConversation.objects.filter(pk=state.pk).update(retry_at=timezone.now() - timedelta(seconds=1))
+            self.assertIn(state.pk, services.pending_ids())
+            with patch("apps.ai_players.tasks.reply_delay_seconds", return_value=0):
+                tasks.respond(str(state.pk))
+            request = AIRequest.objects.get(conversation=state, status="READY")
+            tasks.deliver(str(request.pk))
+            message_count = Message.objects.filter(conversation_id=state.pk).count()
+            tasks.deliver(str(request.pk))
+            self.assertEqual(Message.objects.filter(conversation_id=state.pk).count(), message_count)
+            self.assertEqual(http.call_count, 2)
+        state.refresh_from_db()
+        self.assertEqual(state.handled_revision, state.revision)
+        self.assertEqual(state.last_error, "")
+        self.assertEqual(AIRequest.objects.get(pk=request.pk).status, "DONE")
+
     def test_daily_limits_and_provider_retries(self):
         state = self.matched()
         with patch("apps.ai_players.client.generate", side_effect=client.ProviderError("http_429", True)) as generate:

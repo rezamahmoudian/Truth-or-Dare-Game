@@ -1647,6 +1647,33 @@ Always choose one allowed action and satisfy the output schema, even when no cha
 """
 
 
+def _validate_reply(reply, allowed_actions):
+    if (not isinstance(reply, dict) or set(reply) != {"action", "text", "choice"}
+            or reply.get("action") not in allowed_actions or reply.get("choice") != "TRUTH"
+            or not isinstance(reply.get("text"), str) or len(reply["text"]) > 1200
+            or (reply.get("action") in ("chat", "answer") and not reply["text"].strip())):
+        raise ProviderError("invalid_action", True)
+    return reply
+
+
+def _anthropic_reply(result, allowed_actions):
+    if result.get("stop_reason") == "refusal":
+        raise ProviderError("refusal")
+    if result.get("stop_reason") != "tool_use":
+        raise ProviderError("incomplete_response", True)
+    calls = [part for part in result.get("content", []) if part.get("type") == "tool_use"]
+    if not calls or any(part.get("name") != "game_reply" for part in calls):
+        raise ProviderError("invalid_response", True)
+    replies = [_validate_reply(part["input"], allowed_actions) for part in calls]
+    # Some compatible gateways ignore disable_parallel_tool_use and return
+    # several short messages. Apply one game action only; never guess between
+    # conflicting actions or execute an unvalidated secondary tool call.
+    if len({reply["action"] for reply in replies}) != 1:
+        raise ProviderError("invalid_response", True)
+    texts = list(dict.fromkeys(reply["text"].strip() for reply in replies if reply["text"].strip()))
+    return _validate_reply({**replies[0], "text": "\n".join(texts)}, allowed_actions)
+
+
 def generate(persona, context, action):
     config = configuration()
     if not configured():
@@ -1692,7 +1719,12 @@ def generate(persona, context, action):
         endpoint = f"{base}/messages" if base.endswith("/v1") else f"{base}/v1/messages"
         body = {
             "model": config["model"], "max_tokens": settings.AI_MAX_OUTPUT_TOKENS,
-            "system": SYSTEM + "\nSubmit the required JSON as the input of the game_reply tool.",
+            "system": SYSTEM + "\nCall game_reply exactly once. Submit the required JSON as its input. "
+                "Put any short message fragments in its text field, separated by newlines; do not call multiple tools.",
+            # Short game replies do not need an internal reasoning budget.
+            # Compatible reasoning models otherwise spend max_tokens on
+            # thinking and can truncate the required tool response.
+            "thinking": {"type": "disabled"},
             "messages": body["input"],
             "tools": [{"name": "game_reply", "description": "Return the character's reply and one allowed game action.",
                        "input_schema": schema}],
@@ -1714,29 +1746,19 @@ def generate(persona, context, action):
     except (URLError, TimeoutError, OSError):
         raise ProviderError("network_error", True) from None
     except (ValueError, TypeError):
-        raise ProviderError("invalid_response") from None
+        raise ProviderError("invalid_response", True) from None
     try:
         if config["provider"] == "anthropic":
-            if result.get("stop_reason") == "refusal":
-                raise ProviderError("refusal")
-            if result.get("stop_reason") != "tool_use":
-                raise ProviderError("incomplete_response")
-            calls = [part for part in result.get("content", []) if part.get("type") == "tool_use"]
-            if len(calls) != 1 or calls[0].get("name") != "game_reply":
-                raise ProviderError("invalid_response")
-            reply = calls[0]["input"]
+            reply = _anthropic_reply(result, allowed_actions)
         else:
             if result.get("status") != "completed":
-                raise ProviderError("incomplete_response")
+                raise ProviderError("incomplete_response", True)
             parts = [part for item in result.get("output", []) if item.get("type") == "message"
                      for part in item.get("content", [])]
             if any(part.get("type") == "refusal" for part in parts):
                 raise ProviderError("refusal")
             reply = json.loads("".join(p.get("text", "") for p in parts if p.get("type") == "output_text"))
-        if (reply.get("action") not in allowed_actions or reply.get("choice") != "TRUTH"
-                or not isinstance(reply.get("text"), str) or len(reply["text"]) > 1200
-                or (reply.get("action") in ("chat", "answer") and not reply["text"].strip())):
-            raise ProviderError("invalid_action")
+        reply = _validate_reply(reply, allowed_actions)
         return reply, result.get("usage") or {}
     except (KeyError, TypeError, ValueError, AttributeError):
-        raise ProviderError("invalid_response") from None
+        raise ProviderError("invalid_response", True) from None

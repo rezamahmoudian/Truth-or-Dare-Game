@@ -48,6 +48,7 @@ class AnthropicProviderTests(SimpleTestCase):
         body = json.loads(request.data)
         self.assertEqual(body["model"], "test-sonnet")
         self.assertEqual(body["max_tokens"], 500)
+        self.assertEqual(body["thinking"], {"type": "disabled"})
         self.assertNotIn("store", body)
         self.assertEqual(body["tool_choice"]["name"], "game_reply")
         schema = body["tools"][0]["input_schema"]
@@ -84,6 +85,48 @@ class AnthropicProviderTests(SimpleTestCase):
             )), self.assertRaises(client.ProviderError) as caught:
                 client.generate(self.persona, {}, "chat")
             self.assertEqual(str(caught.exception), f"http_{status}")
+            self.assertEqual(caught.exception.retryable, retryable)
+
+    def test_gateway_multiple_chat_calls_are_combined_without_duplicates(self):
+        response = self.response()
+        response["content"] += [response["content"][0], {
+            "type": "tool_use", "name": "game_reply",
+            "input": {**self.reply, "text": "چه بازی‌هایی دوست داری؟"},
+        }]
+        (reply, _), _ = self.generate(response)
+        self.assertEqual(reply, {**self.reply, "text": "سلام\nچه بازی‌هایی دوست داری؟"})
+
+    def test_gateway_duplicate_game_actions_produce_one_action(self):
+        response = self.response({**self.reply, "action": "confirm", "text": ""})
+        response["content"] *= 2
+        (reply, _), _ = self.generate(response)
+        self.assertEqual(reply, {**self.reply, "action": "confirm", "text": ""})
+
+    def test_multiple_calls_must_all_be_valid_and_have_one_action(self):
+        for secondary in [
+            {**self.reply, "action": "confirm"},
+            {**self.reply, "action": "delete"},
+            {**self.reply, "choice": "DARE"},
+            {**self.reply, "text": "x" * 1200},
+            {**self.reply, "extra": True},
+        ]:
+            with self.subTest(secondary=secondary):
+                response = self.response()
+                response["content"].append({"type": "tool_use", "name": "game_reply", "input": secondary})
+                with self.assertRaises(client.ProviderError) as caught:
+                    self.generate(response)
+                self.assertTrue(caught.exception.retryable)
+
+    def test_malformed_and_truncated_responses_are_retryable_but_refusals_are_not(self):
+        for response, retryable in [
+            ({"stop_reason": "max_tokens"}, True),
+            ({"stop_reason": "tool_use", "content": []}, True),
+            ({"stop_reason": "tool_use", "content": [{"type": "tool_use", "name": "game_reply", "input": "bad"}]}, True),
+            ([], True),
+            ({"stop_reason": "refusal"}, False),
+        ]:
+            with self.subTest(response=response), self.assertRaises(client.ProviderError) as caught:
+                self.generate(response)
             self.assertEqual(caught.exception.retryable, retryable)
 
     def test_availability_requires_selected_provider_credentials_and_model(self):
