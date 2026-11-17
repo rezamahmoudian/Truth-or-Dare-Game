@@ -1,0 +1,32 @@
+# Disposable integration environment; no access to development or cloud data.
+name: ft-liara-smoke-check
+services:
+  ft-liara-smoke-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: smoke
+      POSTGRES_PASSWORD: smoke-only
+      POSTGRES_DB: smoke
+    tmpfs:
+      - /var/lib/postgresql/data
+  ft-liara-smoke-redis:
+    image: redis:7-alpine
+  app:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    depends_on:
+      - ft-liara-smoke-db
+      - ft-liara-smoke-redis
+    environment:
+      DJANGO_SECRET_KEY: isolated-test-only-64891cc988b14505b660cc76
+      DATABASE_URL: postgresql://smoke:smoke-only@ft-liara-smoke-db:5432/smoke
+      REDIS_URL: redis://ft-liara-smoke-redis:6379/0
+      ALLOWED_HOSTS: localhost,127.0.0.1
+      CSRF_TRUSTED_ORIGINS: https://localhost
+      UVICORN_WORKERS: 1
+      CELERY_CONCURRENCY: 1
+    volumes:
+      - uploads:/app/private_media
+volumes:
+  uploads:
