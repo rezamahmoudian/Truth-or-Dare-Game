@@ -59,6 +59,7 @@ def session_payload(
 
     return {
         "session": {
+            "prompt_pack_id": session.prompt_pack_id,
             "id": session.pk,
             "conversation_id": str(session.conversation_id),
             "status": session.status,

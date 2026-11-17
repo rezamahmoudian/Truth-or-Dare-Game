@@ -1,9 +1,11 @@
+import { VipName } from "@/ui/Vip";
 import { useEffect, useState } from "react";
 
 import { FriendButton } from "@/features/friends/FriendButton";
 import { PersonMenu } from "@/features/moderation/PersonMenu";
 import { ApiError } from "@/lib/auth";
 import { faNum } from "@/lib/dates";
+import { publicHandle } from "@/lib/profileDisplay";
 import { getPerson } from "@/lib/socialApi";
 import type { Person } from "@/lib/types";
 import { useInvitations } from "@/store/invitations";
@@ -28,13 +30,14 @@ export function PersonProfileSheet({ person, onClose }: { person: Person; onClos
     return () => { active = false; };
   }, [person.id, setRelation]);
   const profile = full ?? person;
+  const details = [publicHandle(profile), profile.age != null ? `${faNum(profile.age)} ساله` : ""].filter(Boolean).join(" · ");
   return <div className="fixed inset-0 z-50 flex flex-col justify-end bg-black/65 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label={`پروفایل ${person.display_name}`}>
     <button type="button" aria-label="بستن پروفایل" className="flex-1" onClick={onClose} />
     <section className="animate-sheet-in mx-auto max-h-[85dvh] w-full max-w-lg overflow-y-auto rounded-t-sheet border-t border-line bg-surface p-5" style={{ paddingBottom: "max(1.25rem, env(safe-area-inset-bottom))" }}>
       <div className="flex items-center gap-3">
-        <Avatar photoUrl={profile.avatar_url} avatarKey={profile.avatar} name={profile.display_name} size={64} glow />
-        <div className="min-w-0 flex-1"><h2 className="break-words text-lg font-bold">{profile.display_name}</h2>
-          <p className="break-all text-xs text-muted">@{profile.username}{profile.age != null && ` · ${faNum(profile.age)} ساله`}</p></div>
+        <Avatar vip={profile.vip} photoUrl={profile.avatar_url} avatarKey={profile.avatar} name={profile.display_name} size={64} glow />
+        <div className="min-w-0 flex-1"><h2 className="break-words text-lg font-bold"><VipName vip={profile.vip}>{profile.display_name}</VipName></h2>
+          {details && <p className="break-all text-xs text-muted">{details}</p>}</div>
         <PersonMenu userId={profile.id} displayName={profile.display_name} onBlocked={onClose} />
       </div>
       {profile.bio && <p className="my-4 whitespace-pre-wrap break-words text-sm leading-7 text-muted">{profile.bio}</p>}

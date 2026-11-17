@@ -83,6 +83,7 @@ class PromptSuggestionView(APIView):
 
 
 class GameStartSerializer(serializers.Serializer):
+    prompt_pack_id = serializers.IntegerField(min_value=1, required=False, allow_null=True)
     category = serializers.ChoiceField(choices=["", *Category.values], default="")
     max_intensity = serializers.IntegerField(min_value=1, max_value=3, default=2)
     play_mode = serializers.ChoiceField(choices=["CLASSIC", "DEEP_TALK"], default="CLASSIC")
@@ -129,7 +130,7 @@ class CategoryListView(APIView):
     def get(self, request) -> Response:
         rows = (
             Prompt.objects.filter(
-                is_active=True, review_status=PromptReviewStatus.APPROVED
+                is_active=True, review_status=PromptReviewStatus.APPROVED, pack__isnull=True
             )
             .values("category")
             .distinct()

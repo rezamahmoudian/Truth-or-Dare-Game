@@ -1,9 +1,12 @@
-"""OpenAI Responses REST adapter. No user messages, keys or response bodies in logs."""
+"""OpenAI Responses / Anthropic Messages adapters. Never log credentials or content."""
 import json
+import ssl
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+import certifi
 from django.conf import settings
+from .provider import configuration, configured
 
 
 class ProviderError(Exception):
@@ -1645,6 +1648,9 @@ Always choose one allowed action and satisfy the output schema, even when no cha
 
 
 def generate(persona, context, action):
+    config = configuration()
+    if not configured():
+        raise ProviderError("provider_not_configured")
     raw_allowed_actions = context.get("allowed_actions") if isinstance(context, dict) else None
     if isinstance(raw_allowed_actions, (list, tuple)):
         allowed_actions = list(dict.fromkeys(str(item) for item in raw_allowed_actions))
@@ -1672,7 +1678,7 @@ def generate(persona, context, action):
     profile.pop("disclosure", None)
     allowed_action = action if isinstance(action, str) and len(allowed_actions) == 1 else allowed_actions
     body = {
-        "model": settings.OPENAI_MODEL, "store": False,
+        "model": config["model"], "store": False,
         "instructions": SYSTEM,
         "input": [{"role": "user", "content": json.dumps(
             {"fictional_profile": profile, "context": context,
@@ -1680,12 +1686,28 @@ def generate(persona, context, action):
         "max_output_tokens": settings.AI_MAX_OUTPUT_TOKENS,
         "text": {"format": {"type": "json_schema", "name": "game_reply", "strict": True, "schema": schema}},
     }
-    request = Request(f"{settings.OPENAI_BASE_URL.rstrip('/')}/responses", data=json.dumps(body).encode(),
-                      headers={**settings.OPENAI_EXTRA_HEADERS,
-                               "Authorization": f"Bearer {settings.OPENAI_API_KEY}", "Content-Type": "application/json"},
+    base = config["base_url"].rstrip("/")
+    endpoint = f"{base}/responses"
+    if config["provider"] == "anthropic":
+        endpoint = f"{base}/messages" if base.endswith("/v1") else f"{base}/v1/messages"
+        body = {
+            "model": config["model"], "max_tokens": settings.AI_MAX_OUTPUT_TOKENS,
+            "system": SYSTEM + "\nSubmit the required JSON as the input of the game_reply tool.",
+            "messages": body["input"],
+            "tools": [{"name": "game_reply", "description": "Return the character's reply and one allowed game action.",
+                       "input_schema": schema}],
+            "tool_choice": {"type": "tool", "name": "game_reply", "disable_parallel_tool_use": True},
+        }
+    request = Request(endpoint, data=json.dumps(body).encode(),
+                      headers={**config["headers"],
+                               "Authorization": f"Bearer {config['token']}", "Content-Type": "application/json"},
                       method="POST")
     try:
-        with urlopen(request, timeout=settings.AI_REQUEST_TIMEOUT) as response:
+        # Use an updatable CA bundle consistently on Windows and Linux. Some
+        # Windows stores contain stale chains that Python selects over valid ones.
+        # Hostname and certificate verification remain enabled.
+        with urlopen(request, timeout=settings.AI_REQUEST_TIMEOUT,
+                     context=ssl.create_default_context(cafile=certifi.where())) as response:
             result = json.loads(response.read(1_000_000))
     except HTTPError as exc:
         raise ProviderError(f"http_{exc.code}", exc.code in (408, 429) or exc.code >= 500) from None
@@ -1694,13 +1716,23 @@ def generate(persona, context, action):
     except (ValueError, TypeError):
         raise ProviderError("invalid_response") from None
     try:
-        if result.get("status") != "completed":
-            raise ProviderError("incomplete_response")
-        parts = [part for item in result.get("output", []) if item.get("type") == "message"
-                 for part in item.get("content", [])]
-        if any(part.get("type") == "refusal" for part in parts):
-            raise ProviderError("refusal")
-        reply = json.loads("".join(p.get("text", "") for p in parts if p.get("type") == "output_text"))
+        if config["provider"] == "anthropic":
+            if result.get("stop_reason") == "refusal":
+                raise ProviderError("refusal")
+            if result.get("stop_reason") != "tool_use":
+                raise ProviderError("incomplete_response")
+            calls = [part for part in result.get("content", []) if part.get("type") == "tool_use"]
+            if len(calls) != 1 or calls[0].get("name") != "game_reply":
+                raise ProviderError("invalid_response")
+            reply = calls[0]["input"]
+        else:
+            if result.get("status") != "completed":
+                raise ProviderError("incomplete_response")
+            parts = [part for item in result.get("output", []) if item.get("type") == "message"
+                     for part in item.get("content", [])]
+            if any(part.get("type") == "refusal" for part in parts):
+                raise ProviderError("refusal")
+            reply = json.loads("".join(p.get("text", "") for p in parts if p.get("type") == "output_text"))
         if (reply.get("action") not in allowed_actions or reply.get("choice") != "TRUTH"
                 or not isinstance(reply.get("text"), str) or len(reply["text"]) > 1200
                 or (reply.get("action") in ("chat", "answer") and not reply["text"].strip())):

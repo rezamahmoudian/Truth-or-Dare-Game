@@ -1,3 +1,4 @@
+import { VipName } from "@/ui/Vip";
 import { HeroCard, ModeCard, FriendsCard } from "@/features/play/ModeCards";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -18,6 +19,9 @@ import { Button } from "@/ui/Button";
 import { FlameIcon } from "@/ui/icons";
 import { Screen, Skeleton } from "@/ui/Screen";
 import { TabBar } from "@/ui/TabBar";
+import { ShopEntry } from "@/features/shop/ShopEntry";
+import { CreditLimitSheet } from "@/features/shop/CreditLimitSheet";
+import { CreditMatchSheet } from "@/features/shop/CreditMatchSheet";
 
 /**
  * Home.
@@ -49,6 +53,8 @@ export function PlayScreen() {
   const [error, setError] = useState<string | null>(null);
   const [showCode, setShowCode] = useState(false);
   const [aiMode, setAIMode] = useState<MatchMode | null>(null);
+  const [limitedMode, setLimitedMode] = useState<MatchMode | null>(null);
+  const [creditMode, setCreditMode] = useState<MatchMode | null>(null);
 
   useEffect(() => {
     void loadLobby().catch(() => undefined);
@@ -69,10 +75,21 @@ export function PlayScreen() {
 
   async function pick(mode: MatchMode) {
     setError(null);
+    if (mode.credit_required && (mode.credit_available ?? 0) > 0) { setCreditMode(mode); return; }
+    if (mode.remaining_today === 0) { setLimitedMode(mode); return; }
     if (mode.is_ai) { setAIMode(mode); return; }
     try {
       await enqueue(mode.key);
     } catch (err) {
+      if (err instanceof ApiError && err.body && typeof err.body === "object" && "code" in err.body && err.body.code === "credit_confirmation_required") {
+        setCreditMode(mode);
+        return;
+      }
+      if (err instanceof ApiError && err.body && typeof err.body === "object" && "code" in err.body && ["daily_limit", "insufficient_credit"].includes(String(err.body.code))) {
+        setLimitedMode(mode);
+        void loadLobby().catch(() => undefined);
+        return;
+      }
       setError(
         err instanceof ApiError ? (err.firstMessage ?? "شروع نشد.") : "شروع نشد.",
       );
@@ -86,6 +103,11 @@ export function PlayScreen() {
 
   return (
     <Screen header={<LobbyHeader streak={me?.streak_days ?? 0} />} footer={<TabBar />}>
+      {limitedMode && <CreditLimitSheet modeTitle={limitedMode.title} onClose={() => setLimitedMode(null)} />}
+      {creditMode && <CreditMatchSheet modeTitle={creditMode.title} onClose={() => setCreditMode(null)} onStart={async () => {
+        await enqueue(creditMode.key, false, true);
+        setCreditMode(null);
+      }} />}
       {ticket && <WaitingOverlay ticket={ticket} title={waitingTitle} />}
       {aiMode && <AIIntroSheet onClose={() => setAIMode(null)} onStart={async () => {
         await enqueue(aiMode.key, true); setAIMode(null);
@@ -134,6 +156,8 @@ export function PlayScreen() {
             <p className="lobby-caption"><span aria-hidden="true">✧</span> یه بازی ساده، شاید شروع یه رفاقت.</p>
           </section>
         )}
+
+        <ShopEntry />
 
         {error && (
           <p className="animate-rise rounded-field bg-bad/15 px-4 py-3 text-[13px] text-bad">
@@ -185,7 +209,7 @@ function LobbyHeader({ streak }: { streak: number }) {
         className="press shrink-0"
         aria-label="پروفایل"
       >
-        <Avatar
+        <Avatar vip={me?.vip}
           photoUrl={me?.avatar_url} avatarKey={me?.avatar || "a1"}
           name={me?.display_name ?? ""}
           size={40}
@@ -207,7 +231,7 @@ function ActiveNow({ people, onProfile }: { people: Person[]; onProfile: (p: Per
           <li key={person.id} className="w-20 shrink-0">
             <button type="button" aria-label={`پروفایل ${person.display_name}`} onClick={() => onProfile(person)} className="press flex min-h-11 w-full flex-col items-center gap-2 rounded-card py-2">
             <span className="relative">
-              <Avatar
+              <Avatar vip={person.vip}
                 photoUrl={person.avatar_url} avatarKey={person.avatar || "a1"}
                 name={person.display_name}
                 size={56}
@@ -216,7 +240,7 @@ function ActiveNow({ people, onProfile }: { people: Person[]; onProfile: (p: Per
               <span className="absolute bottom-0.5 end-0.5 size-3 rounded-full border-2 border-ink bg-ok" />
             </span>
             <span className="w-full truncate text-center text-[11px] text-muted">
-              {person.display_name}
+              <VipName vip={person.vip}>{person.display_name}</VipName>{person.spotlight && <small className="block text-[9px] text-[#f5d489]">✦ Spotlight</small>}
             </span>
             </button>
           </li>

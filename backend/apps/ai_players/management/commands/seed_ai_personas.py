@@ -35,7 +35,7 @@ class Command(BaseCommand):
             if not Persona.objects.filter(first_name=data["first_name"], last_name=data["last_name"]).exists():
                 Persona.objects.create(**data, boundaries="بدون توهین، فشار عاطفی، محتوای جنسی صریح، درخواست اطلاعات خصوصی یا ادعای انسان واقعی بودن.")
         MatchMode.objects.get_or_create(key="ai-girls", defaults={
-            "title": "هم‌بازی هوش مصنوعی", "subtitle": "سه شخصیت دختر داستانی، سه حال‌وهوای متفاوت",
+            "title": "هم‌بازی تازه", "subtitle": "یه هم‌بازی تازه، یه حال‌وهوای متفاوت",
             "emoji": "✨", "accent": "brand", "target_gender": "F", "is_ai": True,
             "size_min": 2, "size_max": 2, "min_age": 18, "daily_limit": 20,
             "sort_order": 35, "is_active": True,

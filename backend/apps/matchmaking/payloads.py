@@ -19,6 +19,7 @@ def mode_payload(
     mode: MatchMode,
     *,
     remaining: int | None = None,
+    credit_available: int = 0,
     queue_size: int = 0,
 ) -> dict:
     return {
@@ -33,6 +34,8 @@ def mode_payload(
         "is_featured": mode.is_featured,
         "is_ai": mode.is_ai,
         "daily_limit": mode.daily_limit,
+        "credit_available": credit_available if not mode.is_ai else 0,
+        "credit_required": remaining == 0 and not mode.is_ai,
         # None means unlimited; 0 means the cap is used up for today.
         "remaining_today": remaining,
         "queue_size": queue_size,
@@ -42,14 +45,23 @@ def mode_payload(
 
 def ticket_payload(ticket: MatchTicket, *, waited: int = 0, queue_size: int = 0) -> dict:
     from apps.ai_players.models import AISettings
-    fallback_at = ticket.ai_fallback_at if AISettings.load().fallback_enabled else None
+    fallback_at = ticket.ai_fallback_at if not ticket.uses_credit and AISettings.load().fallback_enabled else None
     return {
         "id": ticket.pk,
         "mode": ticket.mode.key,
         "state": ticket.state,
         "widened": ticket.widened,
+        "uses_credit": ticket.uses_credit,
+        "credit_status": credit_status(ticket),
         "ai_fallback_at": fallback_at.isoformat() if fallback_at else None,
         "waited_seconds": waited,
         "queue_size": queue_size,
         "conversation_id": str(ticket.conversation_id) if ticket.conversation_id else None,
     }
+
+
+def credit_status(ticket):
+    if not ticket.uses_credit:
+        return None
+    from apps.billing.models import MatchCreditReservation
+    return MatchCreditReservation.objects.filter(ticket=ticket).values_list("status", flat=True).first()

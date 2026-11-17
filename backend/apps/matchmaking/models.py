@@ -88,6 +88,9 @@ class MatchTicket(models.Model):
         max_length=10, choices=TicketState.choices, default=TicketState.QUEUED
     )
     widened = models.BooleanField(default=False)
+    # Immutable admission decision: free quota and wallet credits are separate.
+    uses_credit = models.BooleanField(default=False)
+    funding_expires_at = models.DateTimeField(null=True, blank=True, db_index=True)
     ai_consent = models.BooleanField(default=False)
     ai_fallback_at = models.DateTimeField(null=True, blank=True)
     conversation = models.ForeignKey(

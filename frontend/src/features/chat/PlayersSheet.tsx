@@ -1,9 +1,11 @@
+import { VipName } from "@/ui/Vip";
 import { Link } from "react-router-dom";
 import { useEffect, useState } from "react";
 
 import { FriendButton } from "@/features/friends/FriendButton";
 import { PersonMenu } from "@/features/moderation/PersonMenu";
 import { faNum } from "@/lib/dates";
+import { publicHandle } from "@/lib/profileDisplay";
 import * as social from "@/lib/socialApi";
 import type { Person, PublicUser } from "@/lib/types";
 import { useSocial } from "@/store/social";
@@ -73,6 +75,7 @@ export function PlayersSheet({
           {participants.map((person) => {
             const full = people[person.id];
             const isSelf = person.id === selfId;
+            const details = [publicHandle(person), full?.age != null ? `${faNum(full.age)} ساله` : ""].filter(Boolean).join(" · ");
 
             return (
               <li
@@ -80,7 +83,7 @@ export function PlayersSheet({
                 className="flex items-center gap-3 border-b border-line-soft py-3 last:border-b-0"
               >
                 <Link to={`/people/${person.id}`} aria-label={`پروفایل ${person.display_name}`} className="relative shrink-0">
-                  <Avatar
+                  <Avatar vip={person.vip}
                     photoUrl={person.avatar_url} avatarKey={person.avatar || "a1"}
                     name={person.display_name}
                     size={44}
@@ -93,13 +96,10 @@ export function PlayersSheet({
 
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-[15px] font-bold">
-                    <Link to={`/people/${person.id}`}>{person.display_name}</Link>
+                    <Link to={`/people/${person.id}`}><VipName vip={person.vip}>{person.display_name}</VipName></Link>
                     {isSelf && <span className="text-xs text-muted"> (شما)</span>}
                   </p>
-                  <p className="truncate text-xs text-muted">
-                    @{person.username}
-                    {full?.age != null && ` · ${faNum(full.age)} ساله`}
-                  </p>
+                  {details && <p className="truncate text-xs text-muted">{details}</p>}
                   {person.is_ai && <div className="mt-2 text-xs leading-6 text-muted">
                     {full?.ai_profile && <p className="mt-1">{full.ai_profile.city} · {full.ai_profile.interests}</p>}
                     {full?.bio && <p>{full.bio}</p>}

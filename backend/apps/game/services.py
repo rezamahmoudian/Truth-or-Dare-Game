@@ -41,6 +41,8 @@ from apps.game.models import (
     Category,
     GameSession,
     Prompt,
+    PromptFeedback,
+    PromptFeedbackValue,
     PromptReviewStatus,
     PromptType,
     SessionStatus,
@@ -54,6 +56,70 @@ from apps.users.models import User
 logger = logging.getLogger("ft.game")
 
 MIN_PLAYERS = 2
+
+
+@transaction.atomic
+def set_prompt_feedback(user: User, conversation_id, message_id: int, value: str) -> dict:
+    """Record one participant's vote for a question and fan it out live.
+
+    A message id is required in addition to the prompt id.  That prevents a
+    client from voting on an arbitrary question it has not actually seen in
+    this conversation, while still aggregating votes across all games.
+    """
+
+    if value not in PromptFeedbackValue.values:
+        raise DomainError("bad_prompt_feedback", "بازخورد نامعتبر است.")
+
+    participant = chat_services.active_participant(user, conversation_id)
+    message = (
+        participant.conversation.messages
+        .filter(pk=message_id, type=MessageType.GAME_PROMPT)
+        .first()
+    )
+    if message is None:
+        raise DomainError("prompt_message_not_found", "سؤال پیدا نشد.", 404)
+
+    try:
+        prompt_id = int((message.meta or {}).get("prompt_id"))
+    except (TypeError, ValueError):
+        prompt_id = 0
+    if not prompt_id:
+        try:
+            turn_id = int((message.meta or {}).get("turn_id"))
+        except (TypeError, ValueError):
+            turn_id = 0
+        prompt_id = Turn.objects.filter(pk=turn_id).values_list("prompt_id", flat=True).first() if turn_id else 0
+    if not prompt_id:
+        raise DomainError("prompt_message_invalid", "این پیام سؤال معتبر نیست.", 409)
+
+    # Serialising on the prompt keeps the aggregate and the upsert consistent
+    # when two players tap at the same time.
+    prompt = Prompt.objects.select_for_update().filter(pk=prompt_id).first()
+    if prompt is None:
+        raise DomainError("prompt_not_found", "سؤال پیدا نشد.", 404)
+
+    PromptFeedback.objects.update_or_create(
+        prompt=prompt,
+        user=user,
+        defaults={"value": value},
+    )
+    totals = PromptFeedback.objects.filter(prompt=prompt).aggregate(
+        positive=Count("id", filter=Q(value=PromptFeedbackValue.POSITIVE)),
+        negative=Count("id", filter=Q(value=PromptFeedbackValue.NEGATIVE)),
+    )
+    payload = {
+        "conversation_id": str(participant.conversation_id),
+        "message_id": message.pk,
+        "prompt_id": prompt.pk,
+        "positive_count": totals["positive"] or 0,
+        "negative_count": totals["negative"] or 0,
+        "user_value": value,
+    }
+    broadcast_payload = {key: item for key, item in payload.items() if key != "user_value"}
+    transaction.on_commit(lambda: broadcast.to_conversation(
+        participant.conversation_id, "game.prompt_feedback", broadcast_payload
+    ))
+    return payload
 
 
 # ---------------------------------------------------------------------------
@@ -207,6 +273,7 @@ def _publish_later(session: GameSession) -> None:
 
 def _pick_prompt(session: GameSession, prompt_type: str) -> Prompt:
     queryset = Prompt.objects.filter(
+        pack_id=session.prompt_pack_id,
         type=prompt_type,
         is_active=True,
         review_status=PromptReviewStatus.APPROVED,
@@ -259,6 +326,7 @@ def start_game(
     max_intensity: int = 2,
     play_mode: str = "CLASSIC",
     replace_session_id: int | None = None,
+    prompt_pack_id: int | None = None,
 ) -> GameSession:
     """Start a game. Rooms are started by their owner; private chats by either.
 
@@ -271,6 +339,8 @@ def start_game(
     and an interrogation.
     """
     conversation = Conversation.objects.select_for_update().get(pk=conversation.pk)
+    if conversation.is_system:
+        raise DomainError("system_conversation_read_only", "امکان شروع بازی در گفت‌وگوی سیستم وجود ندارد.", 403)
     from apps.ai_players.services import assert_session_open
     assert_session_open(conversation.pk)
     chat_services.active_participant(user, conversation.id)
@@ -282,6 +352,10 @@ def start_game(
         raise DomainError("not_room_owner", "فقط میزبان یا دوستت در چت دونفره می‌تواند بازی را شروع کند.", 403)
     if play_mode not in ("CLASSIC", "DEEP_TALK"):
         raise DomainError("invalid_mode", "حالت بازی نامعتبر است.")
+    if prompt_pack_id is not None:
+        from apps.billing.models import InventoryGrant
+        if not InventoryGrant.objects.filter(user=user, item_id=prompt_pack_id, snapshot__kind="PACK").exists():
+            raise DomainError("pack_not_owned", "این بستهٔ سؤال در مجموعهٔ تو نیست.", 403)
     if play_mode == "DEEP_TALK":
         if not friends:
             raise DomainError("friends_only", "گفت‌وگوی عمیق فقط در چت دونفره با دوستت فعال است.", 403)
@@ -290,7 +364,7 @@ def start_game(
             raise DomainError("deep_not_allowed", "امکان شروع گفت‌وگوی عمیق با این بازیکن وجود ندارد.", 403)
         category, max_intensity = "", 3
         if not Prompt.objects.filter(type=PromptType.TRUTH, category__in=[Category.FUNNY, Category.BOLD],
-            is_active=True, review_status=PromptReviewStatus.APPROVED, intensity__lte=3, min_players__lte=2).exists():
+            pack_id=prompt_pack_id, is_active=True, review_status=PromptReviewStatus.APPROVED, intensity__lte=3, min_players__lte=2).exists():
             raise DomainError("no_prompts", "هنوز سؤال خصوصی یا جسورانهٔ تأییدشده‌ای برای این حالت نداریم.", 409)
 
     running = active_session(conversation.id)
@@ -305,6 +379,13 @@ def start_game(
         raise DomainError(
             "not_enough_players", "برای شروع بازی حداقل دو نفر لازم است.", 409
         )
+    if prompt_pack_id is not None:
+        players = list(User.objects.filter(pk__in=player_ids))
+        if any(p.age is None or p.age < 18 or not p.is_active for p in players):
+            raise DomainError("pack_not_allowed", "بسته‌های ویژه برای بازیکنان بزرگسال هستند.", 403)
+        if not Prompt.objects.filter(pack_id=prompt_pack_id, is_active=True, review_status="APPROVED",
+                intensity__lte=max_intensity, min_players__lte=len(player_ids)).filter(Q(category=category) if category else Q()).exists():
+            raise DomainError("pack_not_ready", "این بسته با تنظیمات فعلی سؤال آماده ندارد.", 409)
 
     if running:
         end_game(running, "restarted")
@@ -317,6 +398,7 @@ def start_game(
         play_mode=play_mode,
         max_intensity=max(1, min(3, max_intensity)),
         started_by=user,
+        prompt_pack_id=prompt_pack_id,
     )
 
     logger.info(
@@ -391,6 +473,7 @@ def _assign_prompt(turn: Turn, choice: str) -> None:
         body=prompt.text,
         message_type=MessageType.GAME_PROMPT,
         meta={
+            "prompt_id": prompt.pk,
             "turn_id": turn.pk,
             "player_id": turn.player_id,
             "choice": choice,

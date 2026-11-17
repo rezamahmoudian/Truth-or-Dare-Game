@@ -9,7 +9,7 @@ type GameStore = {
   choiceErrors: Record<number, string>;
   init: () => void;
   load: (conversationId: string) => Promise<void>;
-  start: (conversationId: string, maxIntensity: number, options?: { play_mode?: "CLASSIC" | "DEEP_TALK"; replace_session_id?: number }) => Promise<void>;
+  start: (conversationId: string, maxIntensity: number, options?: { play_mode?: "CLASSIC" | "DEEP_TALK"; replace_session_id?: number; prompt_pack_id?: number }) => Promise<void>;
   stop: (conversationId: string) => Promise<void>;
   choose: (turnId: number, choice: "TRUTH" | "DARE") => void;
   answer: (turnId: number, body: string) => void;

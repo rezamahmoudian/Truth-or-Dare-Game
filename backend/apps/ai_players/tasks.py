@@ -97,9 +97,10 @@ def respond(conversation_id):
         persona = state.persona
         persona_version = persona.updated_at
         allowed_actions = tuple(context.get("allowed_actions") or (action,))
-        request = AIRequest.objects.create(conversation=state, revision=revision, model=settings.OPENAI_MODEL)
+        from .provider import configuration
+        request = AIRequest.objects.create(conversation=state, revision=revision, model=configuration()["model"])
 
-    # No database transaction/row lock is held while waiting for GPT.
+    # No database transaction/row lock is held while waiting for the provider.
     try:
         reply, usage = client.generate(persona, context, action)
     except client.ProviderError as exc:
@@ -249,7 +250,7 @@ def _apply(state, reply, signature, request_id):
                 raise
             chat.post_system_message(
                 state.conversation,
-                "سؤال حقیقت تازه‌ای برای این بازی باقی نمانده؛ نوبت شخصیت AI رد شد.",
+                "سؤال حقیقت تازه‌ای برای این بازی باقی نمانده؛ نوبت رد شد.",
                 meta={"game": "prompts_exhausted"},
             )
             game.skip(actor, signature[0])

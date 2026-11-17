@@ -1,4 +1,6 @@
 import { useState } from "react";
+import type { PublicVIP } from "@/lib/types";
+import { useVipStatus, usePublicLook } from "@/store/vip";
 
 export const AVATAR_KEYS = Array.from({ length: 12 }, (_, i) => `a${i + 1}`);
 
@@ -16,6 +18,7 @@ const HUES: Record<string, number> = Object.fromEntries(
 );
 
 type Props = {
+  vip?: PublicVIP;
   photoUrl?: string | null;
   avatarKey: string;
   name?: string;
@@ -26,6 +29,7 @@ type Props = {
 };
 
 export function Avatar({
+  vip,
   photoUrl,
   avatarKey,
   name = "",
@@ -33,13 +37,15 @@ export function Avatar({
   selected,
   glow = false,
 }: Props) {
+  const membership = useVipStatus(vip);
+  const frame = usePublicLook(vip)?.cosmetics?.FRAME?.visual;
   const [failedUrl, setFailedUrl] = useState<string | null>(null);
   const hue = HUES[avatarKey] ?? 260;
   const initial = name.trim().charAt(0) || "؟";
 
   return (
     <span
-      className={`press inline-grid shrink-0 place-items-center rounded-full font-extrabold text-white ${
+      className={`press inline-grid shrink-0 place-items-center rounded-full font-extrabold text-white ${frame ? `item-frame item-frame-${frame}` : membership?.exclusive_frame ? "vip-avatar" : ""} ${
         selected ? "ring-2 ring-brand ring-offset-2 ring-offset-surface" : ""
       }`}
       style={{

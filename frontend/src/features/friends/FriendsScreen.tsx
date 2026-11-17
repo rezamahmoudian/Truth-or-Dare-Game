@@ -1,3 +1,4 @@
+import { VipName } from "@/ui/Vip";
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
@@ -80,9 +81,9 @@ function PersonRow({
       className="press flex w-full items-center gap-3 border-b border-line-soft px-4 py-3 text-start last:border-b-0"
     >
       <Link to={`/people/${person.id}`} aria-label={`پروفایل ${person.display_name}`} className="flex min-w-0 flex-1 items-center gap-3">
-      <Avatar photoUrl={person.avatar_url} avatarKey={person.avatar || "a1"} name={person.display_name} size={44} glow />
+      <Avatar vip={person.vip} photoUrl={person.avatar_url} avatarKey={person.avatar || "a1"} name={person.display_name} size={44} glow />
       <div className="min-w-0 flex-1">
-        <p className="truncate text-[15px] font-semibold">{person.display_name}</p>
+        <p className="truncate text-[15px] font-semibold"><VipName vip={person.vip}>{person.display_name}</VipName></p>
         <p className="truncate text-xs text-muted">
           @{person.username}
           {person.age !== null && ` · ${faNum(person.age)} ساله`}

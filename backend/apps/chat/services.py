@@ -37,6 +37,7 @@ from apps.chat.models import (
 )
 from apps.chat.payloads import conversation_payload, message_payload
 from apps.core.errors import DomainError
+from apps.core.locking import lock_players
 from apps.users.models import User
 
 logger = logging.getLogger("ft.chat")
@@ -180,6 +181,33 @@ def create_room(owner: User, max_players: int = 8) -> Conversation:
 
 
 @transaction.atomic
+def get_or_create_system_conversation(user: User) -> Conversation:
+    """Return the user's single inbox for notices written by the service team."""
+    lock_players([user.pk])
+    conversation = (
+        Conversation.objects.select_for_update()
+        .filter(is_system=True, owner=user)
+        .first()
+    )
+    if conversation is None:
+        conversation = Conversation.objects.create(
+            type=ConversationType.DIRECT,
+            status=ConversationStatus.ACTIVE,
+            max_players=2,
+            owner=user,
+            is_system=True,
+        )
+        Participant.objects.create(conversation=conversation, user=user)
+    else:
+        conversation.status = ConversationStatus.ACTIVE
+        conversation.save(update_fields=["status"])
+        Participant.objects.filter(conversation=conversation, user=user).update(
+            left_at=None, hidden_at=None
+        )
+    return conversation
+
+
+@transaction.atomic
 def join_by_code(user: User, code: str) -> tuple[Conversation, bool]:
     conversation = (
         Conversation.objects.select_for_update()
@@ -268,7 +296,7 @@ def pair_conversations(a: User, b: User):
 def get_or_create_pair(a: User, b: User, *, room=False, preferred_id=None) -> Conversation:
     # All entry points take the same ordered lock, including simultaneous
     # invitations, matchmaking and opening a friend's chat.
-    list(User.objects.select_for_update().filter(pk__in=[a.pk, b.pk]).order_by("pk"))
+    lock_players([a.pk, b.pk])
     if a.pk == b.pk or a.blocks_or_blocked_by(b):
         raise DomainError("blocked", "امکان ارتباط با این کاربر وجود ندارد.", 403)
     candidates = pair_conversations(a, b)
@@ -411,6 +439,8 @@ def _preview_for(message: Message) -> str:
         return {"image": "📷 عکس", "video": "🎬 ویدئو", "voice": "🎤 پیام صوتی", "audio": "🎵 فایل صوتی"}.get(message.attachment_info.get("kind"), "📎 فایل")
     if message.type == MessageType.TEXT:
         return message.body[:120]
+    if message.type == MessageType.SYSTEM and message.conversation.is_system:
+        return message.body[:120]
     return PREVIEW_LABELS.get(message.type, "")[:120]
 
 
@@ -437,15 +467,26 @@ def post_message(
     answer_turn = None
     if sender is not None:
         conversation = Conversation.objects.select_for_update().get(pk=conversation.pk)
-    if sender is not None and message_type == MessageType.TEXT:
-        # Game transitions lock this same row. Resolve the turn on the server,
-        # so stale clients and simultaneous sends cannot answer twice.
+        if conversation.is_system:
+            raise DomainError(
+                "system_conversation_read_only",
+                "این گفتگو فقط برای دریافت پیام‌های سیستم است.",
+                403,
+            )
+        # ``client_id`` is a caller supplied retry key.  It is scoped to the
+        # conversation, but it must also be bound to the original sender.  The
+        # attachment path performs this check before calling us; keeping it in
+        # the shared service closes the race and protects any future message
+        # transport that reuses ``post_message``.
         if client_id:
             existing = Message.objects.filter(conversation=conversation, client_id=client_id).first()
             if existing is not None:
                 if existing.sender_id != sender.pk:
                     raise DomainError("invalid_client_id", "شناسهٔ پیام نامعتبر است.", 409)
                 return existing, False
+    if sender is not None and message_type == MessageType.TEXT:
+        # Game transitions lock this same row. Resolve the turn on the server,
+        # so stale clients and simultaneous sends cannot answer twice.
         from apps.game.models import Turn, TurnStatus, SessionStatus
         candidate = Turn.objects.filter(
             session__conversation=conversation, session__status=SessionStatus.ACTIVE,
@@ -523,6 +564,8 @@ def post_message(
         ).first()
         if existing is None:
             raise
+        if sender is not None and existing.sender_id != sender.pk:
+            raise DomainError("invalid_client_id", "شناسهٔ پیام نامعتبر است.", 409)
         return existing, False
 
     Conversation.objects.filter(pk=conversation.pk).update(
@@ -637,9 +680,23 @@ def set_reaction(user: User, message_id: int, emoji: str, op: str) -> dict:
 
     active_participant(user, message.conversation_id)
 
+    if op != "remove":
+        from apps.moderation.services import assert_not_blocked
+        from apps.ai_players.services import assert_session_open
+        assert_not_blocked(user, message.conversation)
+        assert_session_open(message.conversation_id)
+        if message.conversation.status == ConversationStatus.CLOSED:
+            raise DomainError("room_closed", "این روم بسته شده است.", 410)
+        if message.is_deleted:
+            raise DomainError("message_deleted", "این پیام حذف شده است.", 409)
+
     emoji = (emoji or "").strip()
     if not emoji or len(emoji) > 8:
         raise DomainError("bad_emoji", "واکنش نامعتبر است.")
+    from apps.billing.item_models import VISUALS
+    from apps.billing.models import InventoryGrant
+    if op != "remove" and emoji in VISUALS["REACTION"] and not InventoryGrant.objects.filter(user=user, snapshot__kind="REACTION", snapshot__visual=emoji).exists():
+        raise DomainError("reaction_not_owned", "این واکنش ویژه در مجموعهٔ تو نیست.", 403)
 
     if op == "remove":
         Reaction.objects.filter(message=message, user=user, emoji=emoji).delete()

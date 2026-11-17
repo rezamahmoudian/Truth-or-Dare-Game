@@ -30,7 +30,7 @@ from . import client, readiness, services, tasks
 from .models import AIConversation, AIEncounter, AIRequest, AISettings, DailyUsage, Persona
 
 
-@override_settings(AI_PLAYERS_ENABLED=True, OPENAI_API_KEY="test-only", AI_DAILY_REQUEST_LIMIT=100,
+@override_settings(AI_PROVIDER="openai", AI_PLAYERS_ENABLED=True, OPENAI_API_KEY="test-only", AI_DAILY_REQUEST_LIMIT=100,
                    OPENAI_BASE_URL="https://api.openai.com/v1", OPENAI_EXTRA_HEADERS={},
                    AI_USER_DAILY_REQUEST_LIMIT=20,
                    AI_MESSAGE_BATCH_SECONDS=0,
@@ -235,6 +235,7 @@ class AIPlayerTests(TestCase):
         public = person_payload(self.persona.user)
         self.assertTrue(public["is_ai"])
         self.assertEqual(public["ai_profile"]["city"], "شیراز")
+        self.assertNotIn("disclosure", public["ai_profile"])
         self.assertNotIn("speaking_style", json.dumps(public))
         self.persona.age = 17
         with self.assertRaises(ValidationError):
@@ -242,12 +243,35 @@ class AIPlayerTests(TestCase):
 
     def test_seed_preserves_edits(self):
         call_command("seed_ai_personas", verbosity=0)
+        mode = MatchMode.objects.get(key="ai-girls")
+        self.assertEqual(mode.title, "هم‌بازی تازه")
+        mode.title = "عنوان مدیر"
+        mode.save(update_fields=["title"])
         self.persona.bio = "ویرایش مدیر"
         self.persona.save()
         call_command("seed_ai_personas", verbosity=0)
         self.assertEqual(Persona.objects.count(), 3)
         self.persona.refresh_from_db()
         self.assertEqual(self.persona.bio, "ویرایش مدیر")
+        mode.refresh_from_db()
+        self.assertEqual(mode.title, "عنوان مدیر")
+
+    def test_default_mode_copy_migration_preserves_admin_edits(self):
+        mode = MatchMode.objects.create(key="ai-girls", is_ai=True, is_active=False,
+            title="هم‌بازی هوش مصنوعی", subtitle="سه شخصیت دختر داستانی، سه حال‌وهوای متفاوت")
+        migration = import_module("apps.matchmaking.migrations.0008_neutral_default_mode_copy")
+        editor = SimpleNamespace(connection=connection)
+        migration.update_default_copy(apps, editor)
+        mode.refresh_from_db()
+        self.assertEqual(mode.title, "هم‌بازی تازه")
+        self.assertEqual(mode.subtitle, "یه هم‌بازی تازه، یه حال‌وهوای متفاوت")
+        self.assertFalse(mode.is_active)
+        self.assertTrue(mode.is_ai)
+        mode.title, mode.subtitle = "عنوان مدیر", "توضیح مدیر"
+        mode.save(update_fields=["title", "subtitle"])
+        migration.update_default_copy(apps, editor)
+        mode.refresh_from_db()
+        self.assertEqual((mode.title, mode.subtitle), ("عنوان مدیر", "توضیح مدیر"))
 
     def test_consent_and_disabled_provider(self):
         self.assertEqual(self.client.post("/api/match/", {"mode": self.mode.key}, format="json").status_code, 400)
@@ -256,6 +280,14 @@ class AIPlayerTests(TestCase):
             self.assertEqual(result.status_code, 503)
         self.assertFalse(MatchTicket.objects.exists())
         self.assertEqual(self.client.get("/api/ai/personas/").data["personas"][0]["ai_profile"]["age"], 24)
+
+    def test_persona_directory_and_retry_require_authentication(self):
+        self.client.force_authenticate(None)
+        self.assertEqual(self.client.get("/api/ai/personas/").status_code, 401)
+        self.assertEqual(
+            self.client.post(f"/api/conversations/{uuid.uuid4()}/ai/retry/").status_code,
+            401,
+        )
 
     def test_matching_is_explicit_block_aware_and_idempotent(self):
         human_mode = MatchMode.objects.create(key="human", title="بازیکن واقعی")

@@ -143,6 +143,7 @@ export async function authBlob(path: string, signal?: AbortSignal): Promise<Blob
 }
 
 export type Me = {
+  vip?: import("./types").PublicVIP;
   id: number;
   username: string;
   display_name: string;

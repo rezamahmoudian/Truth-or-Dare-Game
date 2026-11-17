@@ -104,6 +104,11 @@ class User(AbstractUser):
     def can_change_gender(self) -> bool:
         return self.gender_change_count < settings.MAX_GENDER_CHANGES
 
+    @property
+    def vip(self):
+        from apps.billing.vip import for_user
+        return for_user(self)
+
     def touch_last_seen(self) -> None:
         self.last_seen_at = timezone.now()
         self.save(update_fields=["last_seen_at"])

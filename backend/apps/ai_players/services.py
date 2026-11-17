@@ -18,6 +18,7 @@ from apps.chat.models import (
     Participant,
 )
 from apps.core.errors import DomainError
+from apps.core.locking import lock_players
 from apps.game import services as game
 from apps.game.models import TurnStatus
 from apps.users.models import User
@@ -28,7 +29,8 @@ logger = logging.getLogger("ft.ai")
 
 
 def available():
-    return bool(settings.AI_PLAYERS_ENABLED and settings.OPENAI_API_KEY)
+    from .provider import configured
+    return bool(settings.AI_PLAYERS_ENABLED and configured())
 
 
 def assert_available(user):
@@ -55,8 +57,9 @@ def match_ticket(ticket):
     """Called inside the central matcher, after human matches for fallback tickets."""
     from apps.matchmaking.models import MatchTicket, TicketState
 
-    ticket = MatchTicket.objects.select_for_update().select_related("user", "mode").get(pk=ticket.pk)
-    if ticket.state != TicketState.QUEUED:
+    lock_players([ticket.user_id])
+    ticket = MatchTicket.objects.select_for_update(of=("self",)).select_related("user", "mode").get(pk=ticket.pk)
+    if ticket.state != TicketState.QUEUED or ticket.uses_credit:
         return False
     if (ticket.size_min, ticket.size_max) != (2, 2):
         return False
@@ -66,7 +69,6 @@ def match_ticket(ticket):
                                  or not ticket.ai_fallback_at or ticket.ai_fallback_at > timezone.now()):
         return False
     # The DB lock also protects against an expired central Redis lease.
-    User.objects.select_for_update().get(pk=ticket.user_id)
     try:
         assert_available(ticket.user)
     except DomainError:
@@ -89,7 +91,7 @@ def match_ticket(ticket):
     # missing worker, timeout or unknown health never authorizes a new room.
     if not ready_for_ticket(ticket):
         return False
-    # The human row lock serializes selection and durable encounter creation.
+    # The player guard serializes selection and durable encounter creation.
     # A new ticket must never reopen a room with a previously encountered persona.
     conversation = Conversation.objects.create(type=ConversationType.ROOM, status=ConversationStatus.ACTIVE,
                                                owner=ticket.user, max_players=2)

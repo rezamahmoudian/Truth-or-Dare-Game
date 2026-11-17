@@ -1,0 +1,37 @@
+{% extends "admin/billing/base.html" %}
+{% block finance_content %}
+<section class="finance-panel">
+  <h2>فروش و مصرف اعتبار</h2>
+  <form class="filters" method="get"><div><label for="days">بازه گزارش · روز گذشته</label><input id="days" type="number" min="1" max="365" name="days" value="{{ days }}" required></div><button class="primary" type="submit">نمایش گزارش</button></form>
+  <p class="hint">مبالغ به ریال و بر اساس زمان تأیید پرداخت هستند؛ هر ۱۰ ریال = ۱ تومان. به‌روزرسانی: {{ as_of }}</p>
+  <div class="finance-grid">{% for card in cards %}<div class="finance-stat">{{ card.label }}<strong>{{ card.value }}</strong></div>{% endfor %}</div>
+  <p class="muted">کل اعتبار ثبت‌شده در دفتر: {{ wallets.total|default:0 }} · رزروشده: {{ wallets.reserved|default:0 }} درخواست. ارقام دفتر ممکن است تا اجرای همگام‌سازی انقضا با موجودی قابل‌مصرف تفاوت داشته باشند.</p>
+</section>
+<section class="finance-panel"><h2>رسیدگی به یک کاربر</h2>
+  <form method="get" class="filters"><input type="hidden" name="days" value="{{ days }}"><div><label for="username">نام کاربری دقیق</label><input id="username" name="username" value="{{ username }}" maxlength="150" dir="auto" required></div><button type="submit">پیدا کردن</button></form>
+  {% if found_user %}<p><strong>{{ found_user.display_name }} · {{ found_user.username }}</strong> — شناسه {{ found_user.pk }}</p>
+    <p>اعتبار ثبت‌شده {{ found_wallet.balance|default:0 }} · رزرو {{ found_wallet.reserved|default:0 }}</p>
+    <div class="finance-nav">
+    {% if perms.billing.adjust_wallet %}<a class="pill" href="{{ grant_url }}">جبران / افزایش اعتبار</a>{% endif %}
+    {% if perms.billing.view_order %}<a class="pill" href="{% url 'admin:billing_order_changelist' %}?user__id__exact={{ found_user.pk }}">سفارش‌های کاربر</a>{% endif %}
+    {% if perms.billing.view_entitlement %}<a class="pill" href="{% url 'admin:billing_entitlement_changelist' %}?wallet__user__id__exact={{ found_user.pk }}">اعتبارهای کاربر</a>{% endif %}
+    {% if perms.billing.view_vipsubscription %}<a class="pill" href="{% url 'admin:billing_vipsubscription_changelist' %}?user__id__exact={{ found_user.pk }}">دوره‌های VIP</a>{% endif %}</div>
+  {% elif username %}<p>کاربری با این نام پیدا نشد.</p>{% endif %}
+</section>
+<section class="finance-panel"><h2>نیازمند بررسی · {{ review_count }}</h2><p class="muted">همه بازه‌ها · قدیمی‌ترین ۱۵ مورد</p>
+  {% if perms.billing.view_paymentcheckout %}<a href="{% url 'admin:billing_paymentcheckout_changelist' %}?needs_review__exact=1">نمایش و جستجوی همه موارد</a>{% endif %}
+  <div class="finance-scroll"><table><thead><tr><th>کاربر / پرداخت</th><th>آخرین نتیجه</th><th>آخرین بررسی</th><th>رسیدگی</th></tr></thead><tbody>
+  {% for row in review_rows %}<tr><td class="id">{{ row.attempt.order.user.username }}<br>{{ row.pk }}</td><td>{{ row.last_code }}</td><td>{{ row.updated_at }}</td><td>{% if perms.billing.review_payments %}<a href="{{ row.support_url }}">بررسی و استعلام</a>{% else %}دسترسی مشاهده{% endif %}</td></tr>{% empty %}<tr><td class="empty" colspan="4">پرداختی منتظر رسیدگی نیست.</td></tr>{% endfor %}
+  </tbody></table></div>
+</section>
+<section class="finance-panel"><h2>پرداخت‌شده، منتظر تحویل · {{ delivery_count }}</h2><p class="muted">همه بازه‌ها · قدیمی‌ترین ۱۵ مورد</p>
+  {% if perms.billing.view_order %}<a href="{% url 'admin:billing_order_changelist' %}?status__exact=PAID">همه سفارش‌های منتظر تحویل</a>{% endif %}
+  <div class="finance-scroll"><table><thead><tr><th>کاربر</th><th>سفارش</th><th>زمان پرداخت</th><th>رسیدگی</th></tr></thead><tbody>
+  {% for row in delivery_rows %}<tr><td>{{ row.user.username }}</td><td class="id">{{ row.product_snapshot.title }}<br>{{ row.pk }}</td><td>{{ row.paid_at }}</td><td>{% if perms.billing.retry_delivery %}<a href="{{ row.support_url }}">بررسی تحویل</a>{% else %}دسترسی مشاهده{% endif %}</td></tr>{% empty %}<tr><td colspan="4" class="empty">تحویل معطلی وجود ندارد.</td></tr>{% endfor %}
+  </tbody></table></div>
+</section>
+<section class="finance-panel"><h2>فروش محصولات در بازه</h2><div class="finance-scroll"><table><thead><tr><th>نام در زمان خرید</th><th>تعداد پرداخت</th><th>مبلغ تأییدشده · ریال</th></tr></thead><tbody>
+{% for product in products %}<tr><td>{{ product.product_snapshot__title }}</td><td>{{ product.count }}</td><td>{{ product.amount }}</td></tr>{% empty %}<tr><td class="empty" colspan="3">هنوز پرداخت تأییدشده‌ای در این بازه نداریم.</td></tr>{% endfor %}</tbody></table></div></section>
+<section class="finance-panel"><h2>آخرین سفارش‌های ایجادشده در بازه</h2><div class="finance-scroll"><table><thead><tr><th>سفارش</th><th>کاربر</th><th>مبلغ · ریال</th><th>وضعیت</th><th>زمان ثبت</th></tr></thead><tbody>
+{% for order in recent %}<tr><td class="id">{% if perms.billing.view_order %}<a href="{% url 'admin:billing_order_change' order.pk %}">{{ order.product_snapshot.title }}<br>{{ order.pk }}</a>{% else %}{{ order.product_snapshot.title }}{% endif %}</td><td>{{ order.user.username }}</td><td>{{ order.amount }}</td><td>{{ order.get_status_display }}</td><td>{{ order.created_at }}</td></tr>{% empty %}<tr><td class="empty" colspan="5">سفارشی در این بازه ثبت نشده است.</td></tr>{% endfor %}</tbody></table></div></section>
+{% endblock %}

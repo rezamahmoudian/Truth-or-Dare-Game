@@ -60,14 +60,16 @@ class PublicUserSerializer(serializers.ModelSerializer):
 
     age = serializers.IntegerField(read_only=True)
     avatar_url = serializers.ReadOnlyField()
+    vip = serializers.ReadOnlyField()
 
     class Meta:
         model = User
-        fields = ("id", "username", "display_name", "avatar", "avatar_url", "bio", "gender", "age")
+        fields = ("id", "username", "display_name", "avatar", "avatar_url", "bio", "gender", "age", "vip")
         read_only_fields = fields
 
 
 class MeSerializer(serializers.ModelSerializer):
+    vip = serializers.ReadOnlyField()
     interests = serializers.ListField(child=serializers.CharField(max_length=24, allow_blank=False), max_length=10, required=False)
 
     def validate_interests(self, value):
@@ -81,6 +83,7 @@ class MeSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
         fields = (
+            "vip",
             "id",
             "username",
             "display_name",

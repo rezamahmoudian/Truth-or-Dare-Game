@@ -15,6 +15,7 @@ from django.utils import timezone
 from apps.chat import broadcast
 from apps.chat import services as chat_services
 from apps.core.errors import DomainError
+from apps.core.locking import lock_players
 from apps.users.models import Friendship, FriendshipStatus, User
 
 logger = logging.getLogger("ft.social")
@@ -98,7 +99,7 @@ def _resolve(user: User, other_id: int) -> User:
 @transaction.atomic
 def send_request(user: User, other_id: int) -> Friendship:
     other = _resolve(user, other_id)
-    list(User.objects.select_for_update().filter(pk__in=[user.pk, other.pk]).order_by("pk"))
+    lock_players([user.pk, other.pk])
     # if other.is_ai:
         # raise DomainError("ai_friend_request", "برای ادامه با این شخصیت از گفتگوی استفاده کن.", 409)
     existing = _pair(user, other)
@@ -146,7 +147,7 @@ def send_request(user: User, other_id: int) -> Friendship:
 @transaction.atomic
 def accept_request(user: User, other_id: int) -> Friendship:
     other = _resolve(user, other_id)
-    list(User.objects.select_for_update().filter(pk__in=[user.pk, other.pk]).order_by("pk"))
+    lock_players([user.pk, other.pk])
     row = Friendship.objects.select_for_update().filter(
         from_user=other, to_user=user, status__in=[FriendshipStatus.PENDING, FriendshipStatus.ACCEPTED]
     ).first()
@@ -191,7 +192,7 @@ def accept_request(user: User, other_id: int) -> Friendship:
 @transaction.atomic
 def open_conversation(user: User, other_id: int):
     other = _resolve(user, other_id)
-    list(User.objects.select_for_update().filter(pk__in=[user.pk, other.pk]).order_by("pk"))
+    lock_players([user.pk, other.pk])
     row = _pair(user, other)
     if row is None or row.status != FriendshipStatus.ACCEPTED:
         raise DomainError("not_friends", "ابتدا باید درخواست دوستی پذیرفته شود.", 403)
@@ -236,6 +237,7 @@ def remove(user: User, other_id: int) -> None:
 
 def _user_payload(user: User) -> dict:
     return {
+        "vip": user.vip,
         "id": user.pk,
         "username": user.username,
         "display_name": user.display_name,

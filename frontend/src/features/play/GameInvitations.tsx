@@ -1,3 +1,4 @@
+import { VipName } from "@/ui/Vip";
 import { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 
@@ -41,7 +42,10 @@ export function GameInvitationsScreen() {
 
 export function GameInvitationsLink() {
   const navigate = useNavigate();
-  const count = useInvitations((s) => s.lists.incoming.length);
+  // Keep this count in sync with the home tab badge. Accepted invitations
+  // still need an explicit action ("ورود به بازی"), so they must remain
+  // visible until the player opens them as well.
+  const count = useInvitations((s) => s.lists.incoming.length + s.lists.ready.length);
   return <button type="button" onClick={() => navigate("/invitations")} className="press relative min-h-11 shrink-0 rounded-field bg-surface-2 px-3 text-xs font-bold text-muted">
     دعوت‌ها {count > 0 && <span className="ms-1 rounded-full bg-brand px-1.5 py-0.5 text-white">{faNum(count > 99 ? '+۹۹' : count)}</span>}
   </button>;
@@ -60,8 +64,8 @@ function InvitationRow({ row, onProfile }: { row: GameInvitation; onProfile: (p:
   }
   return <article className="border-b border-line-soft py-3 last:border-0">
     <button type="button" onClick={() => onProfile(row.user)} className="flex min-h-11 w-full items-center gap-3 text-start">
-      <Avatar photoUrl={row.user.avatar_url} avatarKey={row.user.avatar} name={row.user.display_name} size={40} />
-      <span className="min-w-0"><span className="block truncate text-sm font-bold">{row.user.display_name}</span><span className="text-xs text-muted">{row.status === "ACCEPTED" ? "دعوت پذیرفته شد؛ بازی آماده است" : row.direction === "incoming" ? "تو را به بازی دونفره دعوت کرده" : "منتظر پاسخ بازیکن"}</span></span>
+      <Avatar vip={row.user.vip} photoUrl={row.user.avatar_url} avatarKey={row.user.avatar} name={row.user.display_name} size={40} />
+      <span className="min-w-0"><span className="block truncate text-sm font-bold"><VipName vip={row.user.vip}>{row.user.display_name}</VipName></span><span className="text-xs text-muted">{row.status === "ACCEPTED" ? "دعوت پذیرفته شد؛ بازی آماده است" : row.direction === "incoming" ? "تو را به بازی دونفره دعوت کرده" : "منتظر پاسخ بازیکن"}</span></span>
     </button>
     <div className="mt-2 flex gap-2">
       {row.status === "ACCEPTED" ? <button type="button" onClick={() => navigate(`/c/${row.conversation_id}`)} className="min-h-11 flex-1 rounded-field bg-brand px-3 text-sm font-bold text-white">ورود به بازی</button> : row.direction === "incoming" ? <>

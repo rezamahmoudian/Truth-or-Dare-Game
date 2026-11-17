@@ -34,6 +34,8 @@
   .review-tag.pending { background: #fff2d7; color: #8a5b06; }
   .review-tag.approved { background: #dff7e9; color: #176443; }
   .review-tag.rejected { background: #ffe6e9; color: #a32942; }
+  .review-tag.feedback-positive { background: #e8f8ef; color: #176443; }
+  .review-tag.feedback-negative { background: #fff0f0; color: #a32942; }
   .review-prompt { margin: 16px 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 18px; line-height: 1.9; font-weight: 700; color: #261a35; }
   .review-meta { display: flex; gap: 7px 18px; flex-wrap: wrap; color: #695e75; font-size: 12px; }
   .review-note { margin-top: 13px; padding: 9px 11px; background: #fff6e7; border-radius: 8px; color: #70531d; font-size: 13px; }
@@ -89,6 +91,8 @@
             <span class="review-tag">{{ prompt.get_type_display }}</span>
             <span class="review-tag">{{ prompt.get_category_display }}</span>
             <span class="review-tag">شدت {{ prompt.intensity }}</span>
+          <span class="review-tag feedback-positive">👍 {{ prompt.positive_feedback_count|default:0 }}</span>
+          <span class="review-tag feedback-negative">👎 {{ prompt.negative_feedback_count|default:0 }}</span>
           </div>
           <span class="review-meta">#{{ prompt.pk }}</span>
         </div>
@@ -109,6 +113,8 @@
             <label>دلیل رد (اختیاری)<input type="text" name="review_note" maxlength="300" placeholder="یادداشت برای مدیر"></label>
             {% if prompt.review_status != 'APPROVED' %}<button class="review-action approve" type="submit" name="decision" value="APPROVED">✓ تأیید و افزودن به بازی</button>{% endif %}
             {% if prompt.review_status != 'REJECTED' %}<button class="review-action reject" type="submit" name="decision" value="REJECTED">رد سؤال</button>{% endif %}
+            {% if prompt.review_status == 'APPROVED' and prompt.is_active %}<button class="review-action reject" type="submit" name="decision" value="DISABLE">غیرفعال‌کردن</button>{% endif %}
+            {% if prompt.review_status == 'APPROVED' and not prompt.is_active %}<button class="review-action approve" type="submit" name="decision" value="ENABLE">فعال‌سازی دوباره</button>{% endif %}
           {% endif %}
           <a class="review-edit" href="{% url 'admin:game_prompt_change' prompt.pk %}">ویرایش متن و مشخصات</a>
         </form>

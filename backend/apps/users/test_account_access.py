@@ -79,6 +79,11 @@ class AccountAccessTests(TestCase):
         self.client.credentials(HTTP_AUTHORIZATION="Bearer " + guest.data["access"])
         upgraded = self.client.post("/api/auth/upgrade/", {"username": "upgraded", "password": self.password})
         self.assertEqual(upgraded.status_code, 200)
+        self.client.credentials(HTTP_AUTHORIZATION="Bearer " + upgraded.data["access"])
+        self.assertEqual(
+            self.client.post("/api/auth/upgrade/", {"username": "upgraded", "password": self.password}).status_code,
+            400,
+        )
         self.client.credentials()
         self.assertEqual(self.client.post("/api/auth/guest/", {"device_token": token}).status_code, 409)
         login = self.client.post("/api/auth/login/", {"username": "upgraded", "password": self.password})

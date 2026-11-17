@@ -1,9 +1,12 @@
+import { VipName } from "@/ui/Vip";
+import { ItemVisual } from "@/features/shop/ItemVisual";
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { FriendButton } from "@/features/friends/FriendButton";
 import { PersonMenu } from "@/features/moderation/PersonMenu";
 import { ApiError } from "@/lib/auth";
 import { faNum } from "@/lib/dates";
+import { publicHandle } from "@/lib/profileDisplay";
 import { getPerson, openFriendConversation } from "@/lib/socialApi";
 import type { Person } from "@/lib/types";
 import { useInvitations } from "@/store/invitations";
@@ -62,16 +65,16 @@ function ProfileDetails({ userId }: { userId: number }) {
   const interests = person?.interests?.length ? person.interests : person?.ai_profile?.interests.split(/[،,\n]/).map(item => item.trim()).filter(Boolean) ?? [];
   const city = person?.city || person?.ai_profile?.city;
   const earned = person?.badges?.filter(badge => badge.earned).length ?? 0;
+  const handle = person ? publicHandle(person) : "";
   return <Screen className="public-profile-screen" header={<Header title="پروفایل بازیکن" action={<button type="button" className="profile-back" onClick={back}>بازگشت ←</button>} />}>
     <div className="public-profile-content">
       {loading ? <div aria-label="در حال دریافت پروفایل" className="space-y-4"><Skeleton className="h-72 rounded-3xl" /><Skeleton className="h-36 rounded-3xl" /></div> : person ? <>
         <section className="public-profile-hero">
           <div className="profile-cover" aria-hidden><i /><i /><span>✦</span><span>✧</span></div>
           <div className="profile-identity">
-            <button type="button" className="profile-photo-trigger" aria-label={`نمایش عکس پروفایل ${person.display_name}`} onClick={() => setPhotoOpen(true)}><Avatar photoUrl={person.avatar_url} avatarKey={person.avatar || "a1"} name={person.display_name} size={104} /><span aria-hidden>⤢</span></button>
-            <h2>{person.display_name || person.username}</h2><p dir="ltr" className="profile-handle">@{person.username}</p>
+            <button type="button" className="profile-photo-trigger" aria-label={`نمایش عکس پروفایل ${person.display_name}`} onClick={() => setPhotoOpen(true)}><Avatar vip={person.vip} photoUrl={person.avatar_url} avatarKey={person.avatar || "a1"} name={person.display_name} size={104} /><span aria-hidden>⤢</span></button>
+            <h2><VipName vip={person.vip}>{person.display_name || person.username}</VipName></h2>{handle && <p dir="ltr" className="profile-handle">{handle}</p>}
             <div className="profile-facts">{person.age != null && <span>{faNum(person.age)} ساله</span>}{person.gender && <span>{person.gender === "F" ? "دختر" : "پسر"}</span>}{city && <span>{city}</span>}</div>
-            {person.is_ai && <span className="profile-ai-label">شخصیت داستانی · AI</span>}
             {person.joined_at && <p className="profile-joined">همراه بی‌هوا از {new Intl.DateTimeFormat("fa-IR", { year: "numeric", month: "long", timeZone: "UTC" }).format(new Date(person.joined_at))}</p>}
           </div>
           <div className="profile-actions">
@@ -94,6 +97,7 @@ function ProfileDetails({ userId }: { userId: number }) {
             <span className="profile-badge-icon" aria-hidden>{badge.icon}</span><div><h4>{badge.title} {badge.earned && <span aria-label="به دست آمده">✓</span>}</h4><p>{badge.description}</p>{!badge.earned && <><progress value={badge.progress} max={badge.target} aria-label={`پیشرفت ${badge.title}`} /><small>{faNum(badge.progress)} از {faNum(badge.target)}</small></>}</div>
           </article>)}</div>
         </section>
+        {!!person.gifts?.length && <section className="public-profile-section"><h3>هدیه‌های رفاقت</h3><div className="flex flex-wrap gap-4">{person.gifts.map(gift => <div className="text-center" key={gift.visual}><ItemVisual item={{ kind: "GIFT", visual: gift.visual }} /><p className="mt-2 text-xs">{gift.title} · {faNum(gift.count)}</p></div>)}</div></section>}
         {!own && <div className="profile-moderation"><span>تنظیمات ارتباط با این بازیکن</span><PersonMenu userId={userId} displayName={person.display_name} onBlocked={() => setAttempt(v => v + 1)} /></div>}
       </> : null}
       {error && <div role="alert" className="profile-error"><p>{error}</p>{!person && <button type="button" onClick={() => setAttempt(v => v + 1)}>تلاش دوباره</button>}</div>}

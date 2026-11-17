@@ -12,11 +12,32 @@ from apps.game.models import (
     Category,
     GameSession,
     Prompt,
+    PromptFeedbackValue,
     PromptReviewStatus,
     PromptSource,
     PromptType,
     Turn,
 )
+
+
+class NegativeFeedbackFilter(admin.SimpleListFilter):
+    title = "بازخورد منفی"
+    parameter_name = "negative_feedback"
+
+    def lookups(self, request, model_admin):
+        return (
+            ("any", "حداقل یک رأی منفی"),
+            ("3", "۳ رأی منفی یا بیشتر"),
+            ("5", "۵ رأی منفی یا بیشتر"),
+        )
+
+    def queryset(self, request, queryset):
+        value = self.value()
+        if value == "any":
+            return queryset.filter(negative_feedback_count__gte=1)
+        if value in {"3", "5"}:
+            return queryset.filter(negative_feedback_count__gte=int(value))
+        return queryset
 
 
 @admin.register(Prompt)
@@ -35,17 +56,21 @@ class PromptAdmin(admin.ModelAdmin):
         "source",
         "review_status",
         "is_active",
+        "positive_feedback_count",
+        "negative_feedback_count",
         "submitted_by",
         "reviewed_at",
         "review_controls",
     )
     list_filter = (
+        "pack",
         "review_status",
         "source",
         "type",
         "category",
         "intensity",
         "is_active",
+        NegativeFeedbackFilter,
     )
     search_fields = ("text", "submitted_by__username", "submitted_by__display_name")
     readonly_fields = (
@@ -58,7 +83,7 @@ class PromptAdmin(admin.ModelAdmin):
         "review_note",
         "created_at",
     )
-    actions = ("approve_prompts", "reject_prompts")
+    actions = ("approve_prompts", "reject_prompts", "deactivate_negative_prompts", "activate_prompts")
     change_list_template = "admin/game/prompt/change_list.html"
 
     def get_list_display(self, request):
@@ -66,6 +91,24 @@ class PromptAdmin(admin.ModelAdmin):
         if not self.has_change_permission(request):
             return fields[:-1]
         return tuple("category_control" if field == "category" else field for field in fields)
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).annotate(
+            positive_feedback_count=Count(
+                "feedbacks", filter=Q(feedbacks__value=PromptFeedbackValue.POSITIVE), distinct=True
+            ),
+            negative_feedback_count=Count(
+                "feedbacks", filter=Q(feedbacks__value=PromptFeedbackValue.NEGATIVE), distinct=True
+            ),
+        )
+
+    @admin.display(description="👍 مثبت", ordering="positive_feedback_count")
+    def positive_feedback_count(self, obj):
+        return getattr(obj, "positive_feedback_count", 0)
+
+    @admin.display(description="👎 منفی", ordering="negative_feedback_count")
+    def negative_feedback_count(self, obj):
+        return getattr(obj, "negative_feedback_count", 0)
 
     @admin.display(description="دسته‌بندی", ordering="category")
     def category_control(self, obj):
@@ -132,6 +175,16 @@ class PromptAdmin(admin.ModelAdmin):
         updated = self._set_review_status(queryset, PromptReviewStatus.REJECTED, request.user)
         self.message_user(request, f"{updated} سؤال رد شد.")
 
+    @admin.action(description="غیرفعال‌کردن سؤال‌های دارای بازخورد منفی")
+    def deactivate_negative_prompts(self, request, queryset):
+        updated = queryset.filter(is_active=True).update(is_active=False)
+        self.message_user(request, f"{updated} سؤال از انتخاب بازی خارج شد؛ سابقهٔ بررسی آن حفظ شد.")
+
+    @admin.action(description="فعال‌سازی دوبارهٔ سؤال‌های تأییدشده")
+    def activate_prompts(self, request, queryset):
+        updated = queryset.filter(review_status=PromptReviewStatus.APPROVED).update(is_active=True)
+        self.message_user(request, f"{updated} سؤال دوباره در بازی فعال شد.")
+
     @admin.display(description="بررسی")
     def review_controls(self, obj: Prompt):
         approve = (
@@ -152,7 +205,25 @@ class PromptAdmin(admin.ModelAdmin):
             if obj.review_status != PromptReviewStatus.REJECTED
             else ""
         )
-        return format_html('<span class="prompt-review-actions">{} {}</span>', approve, reject)
+        disable = (
+            format_html(
+                '<button type="submit" form="prompt-quick-review-form" '
+                'name="review_action" value="DISABLE:{}" class="prompt-review-button disable">غیرفعال</button>',
+                obj.pk,
+            )
+            if obj.is_active and obj.review_status == PromptReviewStatus.APPROVED
+            else ""
+        )
+        enable = (
+            format_html(
+                '<button type="submit" form="prompt-quick-review-form" '
+                'name="review_action" value="ENABLE:{}" class="prompt-review-button approve">فعال‌سازی</button>',
+                obj.pk,
+            )
+            if not obj.is_active and obj.review_status == PromptReviewStatus.APPROVED
+            else ""
+        )
+        return format_html('<span class="prompt-review-actions">{} {} {} {}</span>', approve, reject, disable, enable)
 
     def quick_review(self, request):
         if request.method != "POST":
@@ -164,7 +235,7 @@ class PromptAdmin(admin.ModelAdmin):
         decision, separator, prompt_id = action.partition(":")
         if (
             separator
-            and decision in (PromptReviewStatus.APPROVED, PromptReviewStatus.REJECTED, "CATEGORY")
+                and decision in (PromptReviewStatus.APPROVED, PromptReviewStatus.REJECTED, "CATEGORY", "DISABLE", "ENABLE")
             and prompt_id.isdecimal()
         ):
             category = request.POST.get(f"category_{prompt_id}")
@@ -174,10 +245,20 @@ class PromptAdmin(admin.ModelAdmin):
                 updated = None
             elif decision == "CATEGORY":
                 updated = queryset.update(category=category)
+            elif decision == "DISABLE":
+                updated = queryset.update(is_active=False)
+            elif decision == "ENABLE":
+                updated = queryset.filter(review_status=PromptReviewStatus.APPROVED).update(is_active=True)
             else:
                 updated = self._set_review_status(queryset, decision, request.user, category=category)
             if updated:
-                verb = "تأیید شد و وارد بازی شد" if decision == PromptReviewStatus.APPROVED else "دسته‌بندی‌اش ذخیره شد" if decision == "CATEGORY" else "رد شد"
+                verb = (
+                    "تأیید شد و وارد بازی شد" if decision == PromptReviewStatus.APPROVED
+                    else "دسته‌بندی‌اش ذخیره شد" if decision == "CATEGORY"
+                    else "از بازی خارج شد" if decision == "DISABLE"
+                    else "دوباره فعال شد" if decision == "ENABLE"
+                    else "رد شد"
+                )
                 self.message_user(request, f"سؤال {verb}.")
             elif updated is not None:
                 self.message_user(request, "سؤال پیدا نشد.", level=messages.ERROR)
@@ -198,10 +279,16 @@ class PromptAdmin(admin.ModelAdmin):
             decision = request.POST.get("decision")
             prompt_id = request.POST.get("prompt_id")
             category = request.POST.get("prompt_category")
-            if decision not in (PromptReviewStatus.APPROVED, PromptReviewStatus.REJECTED):
+            if decision not in (PromptReviewStatus.APPROVED, PromptReviewStatus.REJECTED, "DISABLE", "ENABLE"):
                 self.message_user(request, "عملیات نامعتبر است.", level=messages.ERROR)
             elif category is not None and category not in Category.values:
                 self.message_user(request, "دسته‌بندی نامعتبر است؛ تغییری ذخیره نشد.", level=messages.ERROR)
+            elif decision == "DISABLE":
+                updated = Prompt.objects.filter(pk=prompt_id).update(is_active=False)
+                self.message_user(request, "سؤال به‌دلیل بازخورد از بازی خارج شد." if updated else "سؤال پیدا نشد.")
+            elif decision == "ENABLE":
+                updated = Prompt.objects.filter(pk=prompt_id, review_status=PromptReviewStatus.APPROVED).update(is_active=True)
+                self.message_user(request, "سؤال دوباره فعال شد." if updated else "فقط سؤال‌های تأییدشده قابل فعال‌سازی هستند.", level=messages.SUCCESS if updated else messages.ERROR)
             else:
                 queryset = (
                     Prompt.objects.filter(pk=prompt_id)
@@ -243,7 +330,7 @@ class PromptAdmin(admin.ModelAdmin):
             selected_category = "ALL"
         query = request.GET.get("q", "").strip()[:100]
 
-        prompts = Prompt.objects.select_related("submitted_by", "reviewed_by").order_by(
+        prompts = self.get_queryset(request).select_related("submitted_by", "reviewed_by").order_by(
             "-created_at", "-pk"
         )
         if selected_status != "ALL":

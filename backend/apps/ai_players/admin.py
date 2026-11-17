@@ -34,7 +34,7 @@ class PersonaAdmin(admin.ModelAdmin):
         ("پروفایل عمومی شخصیت داستانی", {"fields": ("profile_photo_preview", "first_name", "last_name", "age", "city", "gender", "avatar", "bio", "interests")}),
         ("شخصیت و رفتار (فقط برای مدیر و مدل)", {"fields": ("personality", "speaking_style", "backstory", "boundaries")}),
         ("فعال‌سازی", {"fields": ("is_active", "user", "updated_at"),
-                     "description": "همهٔ شخصیت‌ها در بازی با نشان هوش مصنوعی معرفی می‌شوند. کلید API فقط در تنظیمات سرور نگهداری می‌شود."}),
+                     "description": "پروفایل عمومی شامل نام، عکس و مشخصات شخصیت است. کلید API فقط در تنظیمات سرور نگهداری می‌شود."}),
     )
 
     @admin.display(description="عکس پروفایل")

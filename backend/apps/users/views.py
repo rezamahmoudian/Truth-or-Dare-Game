@@ -156,11 +156,36 @@ class UpgradeAccountView(APIView):
         )
         serializer.is_valid(raise_exception=True)
 
-        user = request.user
-        user.username = serializer.validated_data["username"]
-        user.set_password(serializer.validated_data["password"])
-        user.is_guest = False
-        user.save(update_fields=["username", "password", "is_guest"])
+        # Lock the identity before promoting it.  Two tabs can submit the
+        # upgrade form at the same time; without this lock both requests see a
+        # guest and one can fail with an IntegrityError (or overwrite the
+        # other's username) instead of returning a useful, stable response.
+        try:
+            with transaction.atomic():
+                user = User.objects.select_for_update().get(pk=request.user.pk)
+                if not user.is_guest:
+                    return Response(
+                        {"detail": "این حساب از قبل دائمی است."},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                username = serializer.validated_data["username"]
+                if User.objects.filter(username__iexact=username).exclude(pk=user.pk).exists():
+                    return Response(
+                        {"username": ["این نام کاربری قبلاً گرفته شده است."]},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                user.username = username
+                user.set_password(serializer.validated_data["password"])
+                user.is_guest = False
+                user.save(update_fields=["username", "password", "is_guest"])
+        except IntegrityError:
+            # A database-level unique race is still possible on deployments
+            # with a case-insensitive username index; expose the same stable
+            # validation shape instead of a 500.
+            return Response(
+                {"username": ["این نام کاربری قبلاً گرفته شده است."]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         logger.info(
             "auth.account_upgraded",
@@ -202,19 +227,24 @@ class FriendListView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request) -> Response:
+        from apps.billing.vip import hydrate
+        friends = hydrate(social.friends_of(request.user))
+        incoming = list(social.incoming_requests(request.user))
+        outgoing = list(social.outgoing_requests(request.user))
+        hydrate([row.from_user for row in incoming] + [row.to_user for row in outgoing])
         return Response(
             {
                 "friends": [
                     person_payload(friend, relation="FRIENDS")
-                    for friend in social.friends_of(request.user)
+                    for friend in friends
                 ],
                 "incoming": [
                     request_payload(row, direction="incoming")
-                    for row in social.incoming_requests(request.user)
+                    for row in incoming
                 ],
                 "outgoing": [
                     request_payload(row, direction="outgoing")
-                    for row in social.outgoing_requests(request.user)
+                    for row in outgoing
                 ],
             }
         )

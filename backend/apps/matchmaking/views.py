@@ -24,11 +24,14 @@ class ModeListView(APIView):
 
 
 def _modes_for(user) -> list[dict]:
+    from apps.billing.wallets import wallet_snapshot
+    credit_available = wallet_snapshot(user)["available"]
     sizes = services.queue_sizes()
     return [
         mode_payload(
             mode,
             remaining=services.remaining_today(user, mode),
+            credit_available=credit_available,
             queue_size=0 if mode.is_ai else sizes.get((mode.size_min, mode.size_max), 0),
         )
         for mode in MatchMode.objects.filter(is_active=True)
@@ -77,13 +80,18 @@ class MatchView(APIView):
         if not mode_key:
             raise DomainError("mode_required", "حالت بازی را انتخاب کنید.")
         if MatchMode.objects.filter(key=mode_key, is_ai=True).exists() and request.data.get("ai_consent") is not True:
-            raise DomainError("ai_consent_required", "بازی با شخصیت هوش مصنوعی و ارسال متن گفتگو به OpenAI را تأیید کن.", 400)
+            raise DomainError("ai_consent_required", "برای شروع، دکمهٔ شروع بازی را بزن.", 400)
 
-        ticket = services.enqueue(request.user, mode_key, ai_consent=request.data.get("ai_consent") is True)
+        ticket = services.enqueue(request.user, mode_key, ai_consent=request.data.get("ai_consent") is True,
+                                  use_credit=request.data.get("use_credit") is True)
         return Response(
             ticket_payload(ticket), status=status.HTTP_201_CREATED
         )
 
     def delete(self, request) -> Response:
-        services.cancel(request.user)
+        raw_id = request.query_params.get("ticket_id")
+        ticket_id = serializers.IntegerField(min_value=1).run_validation(raw_id) if raw_id is not None else None
+        ticket = services.cancel(request.user, ticket_id=ticket_id)
+        if ticket is not None and ticket.state == "MATCHED":
+            return Response(ticket_payload(ticket))
         return Response(status=status.HTTP_204_NO_CONTENT)

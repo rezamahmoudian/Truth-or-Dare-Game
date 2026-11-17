@@ -16,7 +16,7 @@ from . import services
 from .models import AIConversation, AIEncounter, Persona
 
 
-@override_settings(AI_PLAYERS_ENABLED=True, OPENAI_API_KEY="test-only",
+@override_settings(AI_PROVIDER="openai", AI_PLAYERS_ENABLED=True, OPENAI_API_KEY="test-only",
                    AI_DAILY_REQUEST_LIMIT=100, AI_USER_DAILY_REQUEST_LIMIT=100)
 class LifetimeEncounterTests(TestCase):
     def setUp(self):

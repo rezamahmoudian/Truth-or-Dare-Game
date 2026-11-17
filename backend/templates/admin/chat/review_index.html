@@ -1,0 +1,66 @@
+{% extends "admin/base_site.html" %}
+{% load i18n %}
+
+{% block extrastyle %}
+{{ block.super }}
+<style>
+  .review-wrap { direction: rtl; max-width: 1120px; }
+  .review-search { display: flex; gap: 8px; align-items: center; margin: 18px 0; }
+  .review-search input { flex: 1; max-width: 520px; min-height: 42px; padding: 8px 12px; border: 1px solid var(--hairline-color); border-radius: 10px; font-size: 14px; }
+  .review-search button { min-height: 42px; }
+  .review-hint { color: var(--body-quiet-color); margin: 14px 0; }
+  .review-list { display: grid; gap: 12px; }
+  .review-card { display: block; padding: 16px; border: 1px solid var(--hairline-color); border-radius: 14px; background: var(--darkened-bg); color: var(--body-fg); text-decoration: none; }
+  .review-card:hover { border-color: var(--link-fg); background: var(--selected-bg); }
+  .review-card-head { display: flex; justify-content: space-between; gap: 12px; align-items: center; }
+  .review-title { font-size: 15px; font-weight: 700; }
+  .review-meta { color: var(--body-quiet-color); font-size: 12px; margin-top: 8px; }
+  .review-preview { margin-top: 10px; color: var(--body-quiet-color); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .review-pager { display: flex; gap: 12px; justify-content: center; margin: 22px 0; }
+  .review-pager a { padding: 8px 14px; border: 1px solid var(--hairline-color); border-radius: 9px; text-decoration: none; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="review-wrap">
+  <h1>بررسی گفتگوها</h1>
+  <form method="get" class="review-search" role="search">
+    <input name="q" value="{{ query }}" placeholder="نام کاربری یا نام نمایشی را جست‌وجو کنید" autocomplete="off" autofocus>
+    <button type="submit" class="button default">جست‌وجو</button>
+  </form>
+
+  {% if not page.object_list %}
+    {% if query %}<p class="review-hint">گفتگویی برای «{{ query }}» پیدا نشد.</p>{% else %}<p class="review-hint">هنوز گفتگویی ثبت نشده است.</p>{% endif %}
+  {% else %}
+    {% if not query %}<p class="review-hint">آخرین گفتگوها نمایش داده شده‌اند؛ برای پیدا کردن گفتگوی یک کاربر، نام کاربری او را جست‌وجو کنید.</p>{% endif %}
+    <div class="review-list">
+      {% for conversation in page.object_list %}
+        <a class="review-card" href="{% url 'chat_admin_review_detail' conversation.id %}?q={{ query|urlencode }}">
+          <div class="review-card-head">
+            <span class="review-title">
+              {{ conversation.get_type_display }} · {{ conversation.get_status_display }}
+            </span>
+            <span class="review-meta">{{ conversation.message_count }} پیام</span>
+          </div>
+          <div class="review-meta">
+            {% for participant in conversation.participants.all %}
+              {{ participant.user.display_name|default:participant.user.username }}{% if participant.user.is_ai %} (AI){% endif %}{% if not forloop.last %}، {% endif %}
+            {% endfor %}
+          </div>
+          <div class="review-preview">{{ conversation.last_message_preview|default:"بدون پیام" }}</div>
+          {% if conversation.first_message_preview and conversation.first_message_preview != conversation.last_message_preview %}
+            <div class="review-meta">شروع گفتگو: {{ conversation.first_message_preview }}</div>
+          {% endif %}
+        </a>
+      {% endfor %}
+    </div>
+    {% if page.has_other_pages %}
+      <div class="review-pager">
+        {% if page.has_previous %}<a href="?q={{ query|urlencode }}&page={{ page.previous_page_number }}">قبلی</a>{% endif %}
+        <span class="review-meta">صفحه {{ page.number }} از {{ page.paginator.num_pages }}</span>
+        {% if page.has_next %}<a href="?q={{ query|urlencode }}&page={{ page.next_page_number }}">بعدی</a>{% endif %}
+      </div>
+    {% endif %}
+  {% endif %}
+</div>
+{% endblock %}

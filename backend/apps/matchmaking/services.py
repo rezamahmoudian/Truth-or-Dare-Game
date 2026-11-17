@@ -11,7 +11,7 @@ from collections import Counter, defaultdict
 from datetime import timedelta
 
 from django.conf import settings
-from django.db import IntegrityError, transaction
+from django.db import transaction
 from django.db.models import Count
 from django.utils import timezone
 
@@ -24,6 +24,7 @@ from apps.chat.models import (
     Participant,
 )
 from apps.core.errors import DomainError
+from apps.core.locking import lock_players
 from apps.matchmaking.lock import redis_lock
 from apps.matchmaking.models import MatchMode, MatchTicket, TicketState
 from apps.matchmaking.payloads import ticket_payload
@@ -51,17 +52,24 @@ def active_ticket(user: User) -> MatchTicket | None:
 def used_today(user: User, mode: MatchMode) -> int:
     since = timezone.now() - timedelta(hours=24)
     return MatchTicket.objects.filter(
-        user=user, mode=mode, quota_consumed_at__gte=since
+        user=user, mode=mode, quota_consumed_at__gte=since, uses_credit=False,
     ).count()
 
 
 def remaining_today(user: User, mode: MatchMode) -> int | None:
+    if mode.requires_premium and not mode.is_ai:
+        return 0
     if not mode.daily_limit:
         return None
     return max(0, mode.daily_limit - used_today(user, mode))
 
 
-def enqueue(user: User, mode_key: str, *, ai_consent: bool = False) -> MatchTicket:
+@transaction.atomic
+def enqueue(user: User, mode_key: str, *, ai_consent: bool = False, use_credit: bool = False) -> MatchTicket:
+    # Admission/cancellation/matching serialize by user, then conversation,
+    # ticket, and finally wallets (ascending user id). Financial writers never
+    # acquire an application lock after taking a wallet lock.
+    lock_players([user.pk])
     mode = MatchMode.objects.filter(key=mode_key, is_active=True).first()
     if mode is None:
         raise DomainError("mode_not_found", "این حالت بازی موجود نیست.", 404)
@@ -92,15 +100,31 @@ def enqueue(user: User, mode_key: str, *, ai_consent: bool = False) -> MatchTick
         if existing.mode_id == mode.pk:
             return existing
 
+    from apps.matchmaking import quota
+    from apps.billing import wallets
+    # Starting a new search ends the unsettled participation in earlier games.
+    # Lock every affected room first, then every affected wallet in stable order.
+    conversations = list(Conversation.objects.select_for_update().filter(
+        pk__in=MatchTicket.objects.filter(user=user, state=TicketState.MATCHED,
+            quota_consumed_at__isnull=True, quota_closed_at__isnull=True).values("conversation_id")
+    ).order_by("pk"))
+    wallet_users = {user.pk}
+    wallet_users.update(MatchTicket.objects.filter(conversation__in=conversations,
+        uses_credit=True, quota_consumed_at__isnull=True, quota_closed_at__isnull=True).values_list("user_id", flat=True))
+    for user_id in sorted(wallet_users):
+        wallets.locked_wallet(user_id)
+    for conversation in conversations:
+        quota.close_pending(conversation.pk)
+    needs_credit = remaining_today(user, mode) == 0 and not mode.is_ai
     if remaining_today(user, mode) == 0:
-        raise DomainError(
-            "daily_limit", "سهمیه امروز این حالت تمام شده است.", 429
-        )
+        if mode.is_ai or wallets.wallet_snapshot(user)["available"] == 0 and not existing:
+            raise DomainError("daily_limit", "سهمیهٔ رایگان تمام شده و اعتبار آزادی نداری.", 429)
+        if not use_credit:
+            raise DomainError("credit_confirmation_required", "برای این جستجو یک اعتبار رزرو می‌شود؛ تأیید کن.", 409)
     if existing:
         cancel(user, notify=False)
 
-    try:
-        ticket = MatchTicket.objects.create(
+    ticket = MatchTicket.objects.create(
             user=user,
             mode=mode,
             my_gender=user.gender,
@@ -108,17 +132,16 @@ def enqueue(user: User, mode_key: str, *, ai_consent: bool = False) -> MatchTick
             size_min=mode.size_min,
             size_max=mode.size_max,
             category=mode.category,
+            uses_credit=needs_credit,
+            funding_expires_at=(timezone.now() + timedelta(seconds=settings.MATCH_FUNDING_HOLD_SECONDS)
+                                if needs_credit or mode.daily_limit else None),
             ai_consent=ai_consent,
             ai_fallback_at=(timezone.now() + timedelta(seconds=AI_FALLBACK_SECONDS)
-                            if not mode.is_ai and mode.size_min == mode.size_max == 2
+                            if not needs_credit and not mode.is_ai and mode.size_min == mode.size_max == 2
                             and user.age is not None and user.age >= 18 and not user.is_ai else None),
-        )
-    except IntegrityError:
-        # Two enqueues raced; the other one won.
-        found = active_ticket(user)
-        if found is None:
-            raise
-        return found
+    )
+    if needs_credit:
+        wallets.reserve_credit(user=user, ticket_id=ticket.pk)
 
     logger.info(
         "mm.enqueue",
@@ -129,15 +152,24 @@ def enqueue(user: User, mode_key: str, *, ai_consent: bool = False) -> MatchTick
 
 
 @transaction.atomic
-def cancel(user: User, *, notify: bool = True) -> None:
-    ticket = MatchTicket.objects.select_for_update().filter(user=user, state=TicketState.QUEUED).select_related("mode").first()
+def cancel(user: User, *, notify: bool = True, ticket_id: int | None = None) -> MatchTicket | None:
+    lock_players([user.pk])
+    rows = MatchTicket.objects.filter(user=user)
+    rows = rows.filter(pk=ticket_id) if ticket_id is not None else rows.filter(state=TicketState.QUEUED)
+    ticket = rows.select_for_update(of=("self",)).select_related("mode").first()
     if ticket is None:
         return
+    if ticket.state != TicketState.QUEUED:
+        return ticket
     ticket.state = TicketState.CANCELLED
     ticket.save(update_fields=["state"])
+    if ticket.uses_credit:
+        from apps.billing.wallets import release_credit
+        release_credit(user=user, ticket_id=ticket.pk, reason="لغو جستجو")
     logger.info("mm.cancel", extra={"event": "mm.cancel", "user_id": user.pk})
     if notify:
         _notify(ticket, "mm.cancelled")
+    return ticket
 
 
 def status(user: User, *, ticket_id: int | None = None) -> dict | None:
@@ -196,15 +228,28 @@ def recently_active(viewer: User, limit: int = 12) -> list[User]:
     makes the app look emptier than it is, not fuller.
     """
     from apps.chat.presence import app_online_ids
-    return list(
+    from apps.billing.vip import hydrate
+    from apps.billing.models import VIPSpotlight, ItemUse
+    from django.db.models import Exists, OuterRef
+    now = timezone.now()
+    spotlight = VIPSpotlight.objects.filter(subscription__user_id=OuterRef("pk"),
+        starts_at__lte=now, ends_at__gt=now, subscription__revoked_at__isnull=True,
+        subscription__starts_at__lte=now, subscription__ends_at__gt=now)
+    eligible = (
         User.objects.filter(is_active=True, is_ai=False, pk__in=app_online_ids())
         .exclude(pk=viewer.pk)
         .exclude(pk__in=viewer.blocks_made.values_list("blocked_id", flat=True))
         .exclude(pk__in=viewer.blocks_received.values_list("blocker_id", flat=True))
         .exclude(gender="").filter(birth_date__isnull=False)
         .exclude(display_name="")
-        .order_by("?")[:limit]
     )
+    # At most two highlighted slots: ordinary users keep the remaining places.
+    paid_spotlight = ItemUse.objects.filter(user_id=OuterRef("pk"), ends_at__gt=now)
+    highlighted = list(eligible.annotate(featured=Exists(spotlight) | Exists(paid_spotlight)).filter(featured=True).order_by("?")[:min(2, limit)])
+    others = list(eligible.exclude(pk__in=[u.pk for u in highlighted]).order_by("?")[:max(0, limit - len(highlighted))])
+    for user in highlighted:
+        user._spotlight = True
+    return hydrate(highlighted + others)
 
 
 def online_count() -> int:
@@ -217,15 +262,15 @@ def _notify(ticket: MatchTicket, event: str, extra: dict | None = None) -> None:
         ticket, waited=_waited(ticket), queue_size=_queue_size(ticket)
     )
     payload.update(extra or {})
-    broadcast.to_users([ticket.user_id], event, payload)
+    transaction.on_commit(lambda: broadcast.to_users([ticket.user_id], event, payload))
 
 
 def _effective_want_gender(ticket: MatchTicket) -> str:
-    return "" if ticket.widened else ticket.want_gender
+    return "" if ticket.widened and not ticket.uses_credit else ticket.want_gender
 
 
 def _effective_category(ticket: MatchTicket) -> str:
-    return "" if ticket.widened else ticket.category
+    return "" if ticket.widened and not ticket.uses_credit else ticket.category
 
 
 def _compatible(a: MatchTicket, b: MatchTicket) -> bool:
@@ -285,6 +330,32 @@ def _recent_partners(user_ids: list[int]) -> dict[int, set[int]]:
     return partners
 
 
+def _active_partners(user_ids: list[int]) -> dict[int, set[int]]:
+    """Who is currently sharing an open conversation with each user.
+
+    A live chat is already a relationship between these players. If both of
+    them start another search while keeping that chat open, treating them as
+    strangers would match them straight back together and create a confusing
+    duplicate game. Only active participants count; someone who has left the
+    conversation can be matched again.
+    """
+    members = defaultdict(set)
+    rows = Participant.objects.filter(
+        conversation__status__in=(ConversationStatus.WAITING, ConversationStatus.ACTIVE),
+        conversation__participants__user_id__in=user_ids,
+        left_at__isnull=True,
+        user_id__in=user_ids,
+    ).values_list("conversation_id", "user_id")
+    for conversation_id, user_id in rows:
+        members[conversation_id].add(user_id)
+
+    partners: dict[int, set[int]] = defaultdict(set)
+    for group in members.values():
+        for user_id in group:
+            partners[user_id] |= group - {user_id}
+    return partners
+
+
 # ---------------------------------------------------------------------------
 # The matcher
 # ---------------------------------------------------------------------------
@@ -299,6 +370,8 @@ def run_matcher() -> dict:
 
 
 def _match_once() -> dict:
+    from apps.matchmaking.quota import expire_pending
+    expire_pending()
     tickets = list(
         MatchTicket.objects.filter(state=TicketState.QUEUED)
         .select_related("mode", "user")
@@ -340,15 +413,21 @@ def _match_once() -> dict:
 
 def _expire_stale(tickets: list[MatchTicket]) -> int:
     from apps.ai_players.models import AISettings
+    from apps.billing.models import MatchCreditReservation, ReservationStatus
     fallback_enabled = AISettings.load().fallback_enabled
     count = 0
     for ticket in tickets:
         limit = settings.MATCH_TICKET_TTL_SECONDS
         if fallback_enabled and ticket.ai_fallback_at:
             limit = max(limit, int((ticket.ai_fallback_at - ticket.created_at).total_seconds()) + 120)
-        if _waited(ticket) < limit:
+        funding_ended = bool(ticket.funding_expires_at and ticket.funding_expires_at <= timezone.now())
+        if ticket.uses_credit:
+            reservation = MatchCreditReservation.objects.filter(ticket=ticket).select_related("entitlement").first()
+            funding_ended = funding_ended or not reservation or reservation.status != ReservationStatus.HELD or bool(
+                reservation.entitlement.expires_at and reservation.entitlement.expires_at <= timezone.now())
+        if _waited(ticket) < limit and not funding_ended:
             continue
-        changed = MatchTicket.objects.filter(pk=ticket.pk, state=TicketState.QUEUED).update(state=TicketState.EXPIRED)
+        changed = _expire_ticket(ticket)
         if not changed:
             ticket.refresh_from_db()
             continue
@@ -360,10 +439,24 @@ def _expire_stale(tickets: list[MatchTicket]) -> int:
     return count
 
 
+@transaction.atomic
+def _expire_ticket(ticket):
+    lock_players([ticket.user_id])
+    locked = MatchTicket.objects.select_for_update().get(pk=ticket.pk)
+    if locked.state != TicketState.QUEUED:
+        return False
+    locked.state = TicketState.EXPIRED
+    locked.save(update_fields=["state"])
+    if locked.uses_credit:
+        from apps.billing.wallets import release_credit
+        release_credit(user=locked.user, ticket_id=locked.pk, reason="پایان مهلت جستجو")
+    return True
+
+
 def _widen_overdue(tickets: list[MatchTicket]) -> int:
     count = 0
     for ticket in tickets:
-        if ticket.widened or _waited(ticket) < ticket.mode.widen_after_seconds:
+        if ticket.uses_credit or ticket.widened or _waited(ticket) < ticket.mode.widen_after_seconds:
             continue
         ticket.widened = True
         ticket.save(update_fields=["widened"])
@@ -375,7 +468,14 @@ def _widen_overdue(tickets: list[MatchTicket]) -> int:
     return count
 
 
-def _prioritise(tickets: list[MatchTicket]) -> list[MatchTicket]:
+def _priority_times(tickets):
+    from apps.billing.vip import active_periods, benefits
+    boosts = {period.user_id: benefits(period.benefits)["queue_priority_seconds"]
+              for period in active_periods().filter(user_id__in=[t.user_id for t in tickets])}
+    return {t.pk: t.created_at - timedelta(seconds=boosts.get(t.user_id, 0)) for t in tickets}
+
+
+def _prioritise(tickets: list[MatchTicket], priority_times=None) -> list[MatchTicket]:
     """Oldest first, except the scarce side of the queue goes ahead.
 
     Gender-filtered modes are asymmetric in practice: one direction has far
@@ -383,10 +483,11 @@ def _prioritise(tickets: list[MatchTicket]) -> list[MatchTicket]:
     wait for the people whose presence makes those queues work at all.
     """
     counts = Counter(t.my_gender for t in tickets if t.my_gender)
+    priority_times = priority_times if priority_times is not None else _priority_times(tickets)
     minority = min(counts, key=lambda g: counts[g]) if len(counts) > 1 else None
     return sorted(
         tickets,
-        key=lambda t: (0 if minority and t.my_gender == minority else 1, t.created_at),
+        key=lambda t: (0 if minority and t.my_gender == minority else 1, priority_times[t.pk], t.created_at, t.pk),
     )
 
 
@@ -397,9 +498,12 @@ def _form_groups(tickets: list[MatchTicket]) -> list[list[MatchTicket]]:
     user_ids = [t.user_id for t in tickets]
     blocked = _blocked_pairs(user_ids)
     recent = _recent_partners(user_ids)
+    active = _active_partners(user_ids)
 
     def allowed(a: MatchTicket, b: MatchTicket) -> bool:
         if (a.user_id, b.user_id) in blocked:
+            return False
+        if b.user_id in active.get(a.user_id, ()):
             return False
         # A recent partner is only refused while the ticket still has its
         # original constraints; once widened, playing again beats not playing.
@@ -407,7 +511,8 @@ def _form_groups(tickets: list[MatchTicket]) -> list[list[MatchTicket]]:
             return False
         return _compatible(a, b)
 
-    ordered = _prioritise(tickets)
+    priority_times = _priority_times(tickets)
+    ordered = _prioritise(tickets, priority_times)
     used: set[int] = set()
     groups: list[list[MatchTicket]] = []
 
@@ -415,7 +520,7 @@ def _form_groups(tickets: list[MatchTicket]) -> list[list[MatchTicket]]:
     # Keep the original gender preference even after widening: a suitable
     # arrival should go to that queue first. Remaining tickets can still use
     # the usual relaxed matching rules below.
-    by_age = sorted(tickets, key=lambda t: (t.created_at, t.pk))
+    by_age = sorted(tickets, key=lambda t: (priority_times[t.pk], t.created_at, t.pk))
     for seed in by_age:
         if seed.pk in used or seed.mode.is_ai or not seed.want_gender or (seed.size_min, seed.size_max) != (2, 2):
             continue
@@ -454,8 +559,20 @@ def _form_groups(tickets: list[MatchTicket]) -> list[list[MatchTicket]]:
 
 @transaction.atomic
 def _commit_group(group: list[MatchTicket]) -> Conversation | None:
-    locked = list(MatchTicket.objects.select_for_update().filter(pk__in=[t.pk for t in group]).order_by("pk"))
+    lock_players([t.user_id for t in group])
+    locked = list(MatchTicket.objects.select_related("mode", "user").filter(pk__in=[t.pk for t in group]).order_by("pk"))
     if len(locked) != len(group) or any(t.state != TicketState.QUEUED for t in locked):
+        return None
+    group = locked
+    # Revalidate fresh snapshots before opening a room.
+    if any(not _compatible(a, b) for i, a in enumerate(group) for b in group[i + 1:]):
+        return None
+    from apps.billing.models import MatchCreditReservation, ReservationStatus
+    from apps.billing.wallets import locked_wallet, sync_wallet
+    from apps.matchmaking.quota import close_pending
+    # Expired funding cannot start another paid match. No locks are held here
+    # on wallets; the authoritative check follows the conversation lock below.
+    if any(t.funding_expires_at and t.funding_expires_at <= timezone.now() for t in group):
         return None
     mode = group[0].mode
 
@@ -479,7 +596,18 @@ def _commit_group(group: list[MatchTicket]) -> Conversation | None:
             Participant(conversation=conversation, user_id=t.user_id) for t in group
         )
 
-    from apps.matchmaking.quota import close_pending
+    list(MatchTicket.objects.select_for_update().filter(pk__in=[t.pk for t in group]).order_by("pk"))
+    wallet_ids = {t.user_id for t in group if t.uses_credit}
+    wallet_ids.update(MatchTicket.objects.filter(conversation=conversation, uses_credit=True,
+        quota_closed_at__isnull=True, quota_consumed_at__isnull=True).values_list("user_id", flat=True))
+    for user_id in sorted(wallet_ids):
+        sync_wallet(locked_wallet(user_id), timezone.now())
+    for ticket in group:
+        if ticket.uses_credit and not MatchCreditReservation.objects.filter(ticket=ticket,
+                status=ReservationStatus.HELD).exists():
+            # Roll back room reactivation/creation as well as participant edits.
+            transaction.set_rollback(True)
+            return None
     close_pending(conversation.pk)
     MatchTicket.objects.filter(pk__in=[t.pk for t in group]).update(
         state=TicketState.MATCHED, conversation=conversation, matched_at=timezone.now()

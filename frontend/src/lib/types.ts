@@ -1,4 +1,11 @@
+export type PublicVIP = {
+  cosmetics?: Record<string, { visual: string; title: string }>;
+  user_id: number; active: boolean; ends_at: string | null; as_of: string;
+  gold_profile: boolean; vip_badge: boolean; exclusive_frame: boolean;
+};
+
 export type PublicUser = {
+  vip?: PublicVIP;
   is_ai?: boolean;
   id: number;
   username: string;
@@ -7,7 +14,7 @@ export type PublicUser = {
   avatar_url?: string | null;
 };
 
-export type MessageType = "TEXT" | "SYSTEM" | "GAME_PROMPT" | "GAME_ANSWER" | "ATTACHMENT";
+export type MessageType = "TEXT" | "SYSTEM" | "GAME_PROMPT" | "GAME_ANSWER" | "ATTACHMENT" | "ITEM";
 
 export type Attachment = {
   name: string;
@@ -32,6 +39,12 @@ export type Message = {
   reactions: Record<string, number[]>;
 };
 
+export type PromptFeedback = {
+  positive_count: number;
+  negative_count: number;
+  user_value: "POSITIVE" | "NEGATIVE" | null;
+};
+
 /** A message shown before the server has confirmed it. */
 export type PendingMessage = Message & { pending: true; failed?: boolean };
 
@@ -51,8 +64,11 @@ export type Relation =
   | "BLOCKED";
 
 export type Person = {
+  gifts?: { visual: string; title: string; count: number }[];
+  vip?: PublicVIP;
+  spotlight?: boolean;
   is_ai?: boolean;
-  ai_profile?: { first_name: string; last_name: string; city: string; age: number; interests: string; disclosure: string };
+  ai_profile?: { first_name: string; last_name: string; city: string; age: number; interests: string };
   id: number;
   username: string;
   display_name: string;
@@ -112,6 +128,8 @@ export type MatchMode = {
   daily_limit: number;
   /** null = unlimited, 0 = today's cap is used up */
   remaining_today: number | null;
+  credit_available?: number;
+  credit_required?: boolean;
   /** How many people are waiting for a room of this shape, right now. */
   queue_size: number;
   queue_state: "FAST" | "SLOW" | "EMPTY";
@@ -131,6 +149,8 @@ export type Lobby = {
 };
 
 export type MatchTicket = {
+  uses_credit?: boolean;
+  credit_status?: "HELD" | "CONSUMED" | "RELEASED" | "EXPIRED" | null;
   ai_fallback_at?: string | null;
   id: number;
   mode: string;
@@ -211,6 +231,7 @@ export type Conversation = {
   code: string | null;
   owner_id: number | null;
   max_players: number;
+  is_system: boolean;
   created_at: string;
   last_message_at: string | null;
   last_message_preview: string;

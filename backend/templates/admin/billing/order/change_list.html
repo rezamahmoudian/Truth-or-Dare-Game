@@ -1,0 +1,6 @@
+{% extends "admin/change_list.html" %}
+{% block object-tools-items %}
+  {% if perms.billing.view_finance_dashboard %}<li><a href="{% url 'admin:billing_order_dashboard' %}" class="button">داشبورد مالی</a></li>{% endif %}
+  {% if perms.billing.adjust_wallet or perms.billing.debit_wallet or perms.billing.revoke_vip or perms.billing.retry_delivery or perms.billing.review_payments %}<li><a href="{% url 'admin:billing_order_support' %}" class="button">عملیات پشتیبانی</a></li>{% endif %}
+  {{ block.super }}
+{% endblock %}

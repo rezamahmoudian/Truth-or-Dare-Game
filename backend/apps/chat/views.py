@@ -1,6 +1,6 @@
 from django.db import transaction
 from django.http import FileResponse
-from rest_framework import status
+from rest_framework import serializers, status
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -23,6 +23,16 @@ def _int_param(request, name: str) -> int | None:
         raise DomainError("bad_cursor", f"مقدار {name} نامعتبر است.") from exc
 
 
+def _body_int(request, name: str, *, default: int | None = 0, minimum: int = 0) -> int | None:
+    raw = request.data.get(name)
+    if raw in (None, ""):
+        return default
+    try:
+        return serializers.IntegerField(min_value=minimum).run_validation(raw)
+    except serializers.ValidationError as exc:
+        raise DomainError("bad_number", f"مقدار {name} نامعتبر است.") from exc
+
+
 def _require_conversation(conversation_id) -> Conversation:
     conversation = Conversation.objects.filter(pk=conversation_id).first()
     if conversation is None:
@@ -35,6 +45,9 @@ class ConversationListView(APIView):
 
     def get(self, request) -> Response:
         conversations = services.conversations_for(request.user, with_participants=True)
+        conversations = list(conversations)
+        from apps.billing.vip import hydrate
+        hydrate(member.user for conversation in conversations for member in conversation.active_members)
         return Response(
             [
                 conversation_payload(
@@ -64,7 +77,7 @@ class RoomCreateView(APIView):
 
     def post(self, request) -> Response:
         conversation = services.create_room(
-            request.user, int(request.data.get("max_players") or 8)
+            request.user, _body_int(request, "max_players", default=8, minimum=1)
         )
         return Response(
             conversation_payload(conversation, participants=[request.user]),
@@ -115,7 +128,10 @@ class MessageListView(APIView):
             limit=_int_param(request, "limit") or 50,
             cleared_before_id=participant.cleared_before_id,
         )
-        return Response([message_payload(message) for message in messages])
+        from apps.billing.vip import hydrate
+        messages = list(messages)
+        hydrate(message.sender for message in messages if message.sender_id)
+        return Response([message_payload(message, request.user) for message in messages])
 
     def post(self, request, conversation_id) -> Response:
         """HTTP fallback for sending.
@@ -130,7 +146,7 @@ class MessageListView(APIView):
             sender=request.user,
             body=request.data.get("body", ""),
             client_id=str(request.data.get("client_id") or "")[:40],
-            reply_to_id=request.data.get("reply_to_id"),
+            reply_to_id=_body_int(request, "reply_to_id", default=None, minimum=1),
         )
         return Response(
             message_payload(message),
@@ -213,7 +229,8 @@ class MarkReadView(APIView):
 
     def post(self, request, conversation_id) -> Response:
         up_to = services.mark_read(
-            request.user, conversation_id, int(request.data.get("up_to_message_id") or 0)
+            request.user, conversation_id,
+            _body_int(request, "up_to_message_id", default=0, minimum=0),
         )
         return Response({"up_to_message_id": up_to})
 

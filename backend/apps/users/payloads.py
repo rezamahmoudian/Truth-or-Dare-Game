@@ -7,7 +7,10 @@ def person_payload(user: User, *, relation: str | None = None) -> dict:
     Note what is absent: birth_date. Only the derived age leaves the server —
     the exact date is an identifier and nobody else needs it.
     """
+    from apps.billing.vip import for_user
     payload = {
+        "vip": for_user(user),
+        "spotlight": getattr(user, "_spotlight", False),
         "id": user.pk,
         "username": user.username,
         "display_name": user.display_name,

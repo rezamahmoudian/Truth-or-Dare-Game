@@ -26,6 +26,13 @@ class MatchModeAdmin(admin.ModelAdmin):
 
 @admin.register(MatchTicket)
 class MatchTicketAdmin(admin.ModelAdmin):
-    list_display = ("id", "user", "mode", "state", "widened", "created_at")
-    list_filter = ("state", "widened", "mode")
+    list_display = ("id", "user", "mode", "state", "uses_credit", "quota_consumed_at", "created_at")
+    list_filter = ("state", "uses_credit", "mode")
     raw_id_fields = ("user", "conversation")
+    readonly_fields = tuple(field.name for field in MatchTicket._meta.fields)
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False

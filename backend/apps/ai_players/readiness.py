@@ -14,6 +14,7 @@ from apps.core.errors import DomainError
 
 from . import client
 from .models import Persona
+from .provider import configuration
 
 logger = logging.getLogger("ft.ai")
 READY_SECONDS = 15
@@ -22,8 +23,7 @@ FAILURE_SECONDS = 30
 
 def provider_key():
     # Changing provider, credential, model or headers invalidates old results.
-    config = [settings.OPENAI_BASE_URL, settings.OPENAI_API_KEY,
-              settings.OPENAI_MODEL, settings.OPENAI_EXTRA_HEADERS]
+    config = configuration()
     digest = hashlib.sha256(json.dumps(config, sort_keys=True).encode()).hexdigest()
     return f"ai:readiness:{digest}"
 

@@ -1,4 +1,5 @@
 from django.contrib import admin
+from django.urls import reverse
 
 from apps.chat.models import Conversation, Message, Participant, Reaction
 
@@ -13,8 +14,21 @@ class ParticipantInline(admin.TabularInline):
 class ConversationAdmin(admin.ModelAdmin):
     list_display = ("id", "type", "status", "code", "last_message_at")
     list_filter = ("type", "status")
-    search_fields = ("code", "id")
+    search_fields = (
+        "code",
+        "id",
+        "participants__user__username",
+        "participants__user__display_name",
+    )
     inlines = [ParticipantInline]
+    change_list_template = "admin/chat/conversation/change_list.html"
+
+    def changelist_view(self, request, extra_context=None):
+        extra_context = {
+            **(extra_context or {}),
+            "chat_review_url": reverse("chat_admin_reviews"),
+        }
+        return super().changelist_view(request, extra_context=extra_context)
 
 
 @admin.register(Message)

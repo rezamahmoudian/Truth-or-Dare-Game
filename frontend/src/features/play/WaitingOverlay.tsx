@@ -5,6 +5,18 @@ import type { MatchTicket } from "@/lib/types";
 import { useMatch } from "@/store/match";
 import { Button } from "@/ui/Button";
 
+const SEARCH_TIPS = [
+  "اگر سؤالی را دوست نداشتی، با یک لمس بازخورد منفی بده تا بهترش کنیم.",
+  "با لمس عکس هر بازیکن، پروفایل، علایق و نشان‌هایش را ببین.",
+  "از داخل پروفایل بازیکن‌ها می‌توانی درخواست دوستی یا دعوت بازی بفرستی.",
+  "دوستانت را در بخش «دوستان» پیدا کن و هر وقت خواستی به آن‌ها پیام بده.",
+  "از داخل هر چت، هر زمان خواستی می‌توانی یک بازی جدید شروع کنی.",
+  "چند لحظه صبر کن؛ یک گفت‌وگوی جالب در راه است.",
+  "هنوز کسی پیدا نشده؟ نگران نباش، بهترین بازی‌ها گاهی با کمی تأخیر شروع می‌شوند.",
+  "یک هم‌بازی، چند سؤال و کلی حرف برای گفتن در راه است.",
+  "هنوز در صف جست‌وجو هستی.",
+] as const;
+
 /**
  * The waiting screen is never silent.
  *
@@ -17,7 +29,16 @@ export function WaitingOverlay({ ticket, title }: { ticket: MatchTicket; title: 
   const cancel = useMatch((s) => s.cancel);
   const resume = useMatch((s) => s.resume);
   const [elapsed, setElapsed] = useState(ticket.waited_seconds);
+  const [tipIndex, setTipIndex] = useState(0);
   const [cancelling, setCancelling] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setTipIndex((index) => (index + 1) % SEARCH_TIPS.length);
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     let stopped = false;
@@ -59,11 +80,23 @@ export function WaitingOverlay({ ticket, title }: { ticket: MatchTicket; title: 
         </p>
       </div>
 
+      <p
+        key={tipIndex}
+        role="status"
+        aria-live="polite"
+        className="surface-card animate-rise flex min-h-[72px] max-w-xs items-center rounded-card px-4 py-3 text-[13px] leading-7 text-muted"
+      >
+        {SEARCH_TIPS[tipIndex]}
+      </p>
+
       {ticket.widened && (
         <p className="surface-card animate-rise rounded-card px-4 py-3 text-[13px] leading-relaxed text-muted">
           کمی بیشتر می‌گردیم تا زودتر یکی پیدا شود…
         </p>
       )}
+      {ticket.uses_credit && <p className="surface-card max-w-xs rounded-card px-4 py-3 text-[13px] leading-7 text-muted">
+        یک اعتبار رزرو شده، هنوز مصرف نشده. بعد از دقیقهٔ اول، اگر هر دو پیام بدهید مصرف می‌شود؛ با لغو یا جستجوی بی‌نتیجه آزاد می‌شود. فقط با بازیکنی مطابق انتخابت مچ می‌شوی.
+      </p>}
 
       <Button
         variant="ghost"
@@ -71,8 +104,11 @@ export function WaitingOverlay({ ticket, title }: { ticket: MatchTicket; title: 
         busy={cancelling}
         onClick={async () => {
           setCancelling(true);
+          setError(null);
           try {
             await cancel();
+          } catch {
+            setError("لغو انجام نشد؛ دوباره امتحان کن.");
           } finally {
             setCancelling(false);
           }
@@ -80,6 +116,7 @@ export function WaitingOverlay({ ticket, title }: { ticket: MatchTicket; title: 
       >
         انصراف
       </Button>
+      {error && <p className="text-sm text-bad" role="alert">{error}</p>}
     </div>
   );
 }

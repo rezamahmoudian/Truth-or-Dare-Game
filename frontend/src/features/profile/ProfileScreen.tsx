@@ -1,3 +1,5 @@
+import { VipName } from "@/ui/Vip";
+import { MembershipCard } from "@/features/shop/MembershipCard";
 import { useEffect, useState } from "react";
 
 import { UpgradeAccountCard } from "@/features/profile/UpgradeAccountCard";
@@ -13,6 +15,7 @@ import { useSession } from "@/store/session";
 import { Avatar } from "@/ui/Avatar";
 import { Header, Screen } from "@/ui/Screen";
 import { TabBar } from "@/ui/TabBar";
+import { ShopEntry } from "@/features/shop/ShopEntry";
 
 export function ProfileScreen() {
   const user = useSession((s) => s.user);
@@ -22,9 +25,9 @@ export function ProfileScreen() {
     <Screen header={<Header title="پروفایل" />} footer={<TabBar />}>
       <div className="mx-auto flex max-w-md flex-col gap-4 px-4 py-5">
         <section className="profile-card flex items-center gap-4 rounded-card p-5">
-          <Link to={`/people/${user.id}`} aria-label="نمایش پروفایل من"><Avatar photoUrl={user.avatar_url} avatarKey={user.avatar || "a1"} name={user.display_name} size={64} glow /></Link>
+          <Link to={`/people/${user.id}`} aria-label="نمایش پروفایل من"><Avatar vip={user.vip} photoUrl={user.avatar_url} avatarKey={user.avatar || "a1"} name={user.display_name} size={64} glow /></Link>
           <div className="min-w-0">
-            <p className="truncate text-[19px] font-extrabold">{user.display_name}</p>
+            <p className="truncate text-[19px] font-extrabold"><VipName vip={user.vip}>{user.display_name}</VipName></p>
             <p className="truncate text-[13px] text-muted">@{user.username}</p>
             <p className="mt-1 text-[12px] text-faint">
               {user.gender === "F" ? "زن" : "مرد"}
@@ -33,6 +36,9 @@ export function ProfileScreen() {
           </div>
         </section>
 
+        <ShopEntry />
+        <Link className="surface-card min-h-14 rounded-card p-4 text-sm font-bold" to="/shop/items">✧ استایل و مجموعهٔ من <span className="float-end text-muted">←</span></Link>
+        <MembershipCard key={user.id} />
         <ProfilePhotoEditor />
         <ProfileDetailsEditor />
         {user.is_guest && <UpgradeAccountCard />}
@@ -82,13 +88,13 @@ function BlockedList() {
               key={person.id}
               className="flex items-center gap-3 border-b border-line-soft py-2 last:border-b-0"
             >
-              <Avatar
+              <Avatar vip={person.vip}
                 photoUrl={person.avatar_url} avatarKey={person.avatar || "a1"}
                 name={person.display_name}
                 size={36}
               />
               <span className="min-w-0 flex-1 truncate text-sm">
-                {person.display_name}
+                <VipName vip={person.vip}>{person.display_name}</VipName>
               </span>
               <button
                 type="button"

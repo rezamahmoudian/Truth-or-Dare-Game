@@ -140,6 +140,9 @@ class MatchQuotaTests(TestCase):
     def test_same_rule_applies_to_other_limited_modes(self):
         for index, gender in enumerate(("M", "")):
             with self.subTest(gender=gender):
+                # Commit now revalidates the selected mode's promised filter.
+                self.other.gender = gender or "F"
+                self.other.save(update_fields=["gender"])
                 mode = MatchMode.objects.create(key=f"limited-{index}", title="محدود", target_gender=gender, daily_limit=2)
                 self.match(mode)
                 self.send(self.user, 60)

@@ -1,0 +1,101 @@
+{% extends "admin/base_site.html" %}
+{% load i18n %}
+
+{% block extrastyle %}
+{{ block.super }}
+<style>
+  .chat-review { direction: rtl; max-width: 860px; margin: 0 auto; }
+  .chat-review-head { display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; margin-bottom: 16px; }
+  .chat-review-head h1 { margin: 0; }
+  .chat-review-back { text-decoration: none; }
+  .chat-review-members { color: var(--body-quiet-color); font-size: 12px; margin: 8px 0 18px; }
+  .chat-review-scroll { display: flex; flex-direction: column; gap: 8px; padding: 20px 14px; border: 1px solid var(--hairline-color); border-radius: 18px; background: var(--body-bg); min-height: 420px; }
+  .chat-day { align-self: center; color: var(--body-quiet-color); font-size: 11px; margin: 10px; }
+  .chat-row { display: flex; max-width: 78%; gap: 8px; align-items: flex-end; }
+  .chat-row.mine { align-self: flex-start; flex-direction: row-reverse; }
+  .chat-row.other { align-self: flex-end; }
+  .chat-avatar { width: 30px; height: 30px; border-radius: 50%; background: var(--selected-bg); display: grid; place-items: center; font-size: 12px; color: var(--body-quiet-color); flex: 0 0 auto; }
+  .chat-bubble { padding: 9px 12px; border-radius: 15px; background: var(--darkened-bg); border: 1px solid var(--hairline-color); min-width: 90px; }
+  .chat-row.mine .chat-bubble { background: var(--selected-bg); }
+  .chat-sender { color: var(--body-quiet-color); font-size: 11px; margin-bottom: 4px; }
+  .chat-body { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.8; font-size: 13px; }
+  .chat-time { color: var(--body-quiet-color); font-size: 10px; margin-top: 5px; direction: ltr; text-align: left; }
+  .chat-attachment { display: inline-block; margin-top: 7px; padding: 6px 9px; border-radius: 8px; background: var(--body-bg); text-decoration: none; font-size: 12px; }
+  .chat-deleted { color: var(--body-quiet-color); font-style: italic; }
+  .chat-pager { display: flex; gap: 12px; justify-content: center; margin: 16px 0; }
+  .chat-pager a { padding: 8px 14px; border: 1px solid var(--hairline-color); border-radius: 9px; text-decoration: none; }
+  .chat-readonly { color: var(--body-quiet-color); font-size: 12px; text-align: center; margin-top: 12px; }
+  .system-notice-form { margin: 0 0 18px; padding: 16px; border: 1px solid var(--hairline-color); border-radius: 16px; background: var(--darkened-bg); }
+  .system-notice-form h2 { margin: 0 0 8px; font-size: 15px; }
+  .system-notice-form p { color: var(--body-quiet-color); font-size: 12px; margin: 0 0 12px; }
+  .system-notice-form select, .system-notice-form textarea { width: 100%; box-sizing: border-box; margin-bottom: 9px; padding: 9px 11px; border: 1px solid var(--hairline-color); border-radius: 9px; font: inherit; }
+  .system-notice-form textarea { min-height: 92px; resize: vertical; }
+  .system-notice-form button { min-height: 40px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="chat-review">
+  <div class="chat-review-head">
+    <h1>گفتگوی ثبت‌شده</h1>
+    <a class="chat-review-back" href="{% url 'chat_admin_reviews' %}{% if query %}?q={{ query|urlencode }}{% endif %}">بازگشت به جست‌وجو</a>
+  </div>
+  <div class="chat-review-members">
+    {% for participant in participants %}
+      {{ participant.user.display_name|default:participant.user.username }}{% if participant.user.is_ai %} (AI){% endif %}{% if not forloop.last %}، {% endif %}
+    {% endfor %}
+    · {{ conversation.get_type_display }} · {{ conversation.get_status_display }}
+  </div>
+
+  {% if human_participants %}
+    <form class="system-notice-form" method="post" action="{% url 'chat_admin_send_system' conversation.id %}">
+      {% csrf_token %}
+      <h2>ارسال پیام از طرف سیستم</h2>
+      <p>این پیام در صندوق «سیستم» کاربر قرار می‌گیرد و به‌صورت پیام سیستمی نمایش داده می‌شود.</p>
+      <label for="system-target">گیرنده</label>
+      <select id="system-target" name="target_user_id" required>
+        {% for participant in human_participants %}
+          <option value="{{ participant.user_id }}">{{ participant.user.display_name|default:participant.user.username }} ({{ participant.user.username }})</option>
+        {% endfor %}
+      </select>
+      <label for="system-body">متن پیام</label>
+      <textarea id="system-body" name="body" maxlength="2000" required placeholder="متن پیام را بنویسید…"></textarea>
+      {% if query %}<input type="hidden" name="q" value="{{ query }}">{% endif %}
+      <button type="submit" class="button default">ارسال پیام سیستم</button>
+    </form>
+  {% endif %}
+
+  {% if page.has_previous %}
+    <div class="chat-pager"><a href="?page={{ page.previous_page_number }}{% if query %}&q={{ query|urlencode }}{% endif %}">پیام‌های قدیمی‌تر</a></div>
+  {% endif %}
+
+  <div class="chat-review-scroll">
+    {% for message in page.object_list %}
+      <div class="chat-row {% if message.sender_id == first_participant_id %}mine{% else %}other{% endif %}">
+        <div class="chat-avatar">
+          {% if message.sender %}
+            {% if message.sender.is_ai %}AI{% elif message.sender.display_name %}{{ message.sender.display_name|slice:":1" }}{% elif message.sender.username %}{{ message.sender.username|slice:":1" }}{% else %}؟{% endif %}
+          {% else %}•{% endif %}
+        </div>
+        <div class="chat-bubble">
+          <div class="chat-sender">
+            {% if message.sender %}{% if message.sender.display_name %}{{ message.sender.display_name }}{% elif message.sender.username %}{{ message.sender.username }}{% else %}کاربر حذف‌شده{% endif %}{% else %}سیستم{% endif %}
+          </div>
+          {% if message.is_deleted %}<div class="chat-deleted">این پیام حذف شده است.</div>{% elif message.body %}<div class="chat-body">{{ message.body }}</div>{% endif %}
+          {% if message.attachment %}
+            {% if can_view_media %}<a class="chat-attachment" href="{% url 'chat_admin_review_attachment' conversation.id message.id %}" target="_blank" rel="noreferrer">📎 {{ message.attachment_info.name|default:"پیوست" }}</a>{% else %}<span class="chat-attachment">📎 پیوست (دسترسی محدود)</span>{% endif %}
+          {% endif %}
+          <div class="chat-time">{{ message.created_at|date:"Y/m/d H:i" }}</div>
+        </div>
+      </div>
+    {% empty %}
+      <div class="chat-readonly">این گفتگو پیامی ندارد.</div>
+    {% endfor %}
+  </div>
+  <p class="chat-readonly">این گفتگو فقط برای بررسی نمایش داده می‌شود و امکان ارسال پیام ندارد.</p>
+
+  {% if page.has_next %}
+    <div class="chat-pager"><a href="?page={{ page.next_page_number }}{% if query %}&q={{ query|urlencode }}{% endif %}">پیام‌های جدیدتر</a></div>
+  {% endif %}
+</div>
+{% endblock %}

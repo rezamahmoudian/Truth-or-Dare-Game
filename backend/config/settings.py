@@ -54,6 +54,7 @@ LOCAL_APPS = [
     "apps.matchmaking",
     "apps.moderation",
     "apps.ai_players",
+    "apps.billing",
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
@@ -155,6 +156,10 @@ REST_FRAMEWORK = {
     "DEFAULT_THROTTLE_RATES": {
         "chat_upload": "60/hour",
         "ai_retry": "10/hour",
+        "billing_order": "30/hour",
+        "billing_payment": "30/hour",
+        "billing_check": "12/minute",
+        "billing_callback": "120/minute",
         # The guest endpoint mints accounts for anyone who asks, so it is the
         # obvious target for someone scripting a few thousand of them.
         "auth": env("THROTTLE_AUTH", default="20/hour"),
@@ -190,6 +195,16 @@ MIN_AGE = env.int("MIN_AGE", default=18)
 # people flip at will. One correction after the initial choice.
 MAX_GENDER_CHANGES = env.int("MAX_GENDER_CHANGES", default=1)
 
+# Commerce foundation. Live ordering stays off until the gateway is connected.
+MATCH_FUNDING_HOLD_SECONDS = env.int("MATCH_FUNDING_HOLD_SECONDS", default=900)
+BILLING_ORDERS_ENABLED = env.bool("BILLING_ORDERS_ENABLED", default=False)
+BILLING_ORDER_TTL_MINUTES = env.int("BILLING_ORDER_TTL_MINUTES", default=30)
+BILLING_PAYMENTS_ENABLED = env.bool("BILLING_PAYMENTS_ENABLED", default=False)
+BILLING_GATEWAY = env("BILLING_GATEWAY", default="")
+BILLING_GATEWAY_ADAPTERS = env.json("BILLING_GATEWAY_ADAPTERS", default={})
+# One canonical app origin; never derive bank callbacks or redirects from Host.
+BILLING_PUBLIC_BASE_URL = env("BILLING_PUBLIC_BASE_URL", default="")
+
 # How many turns each player gets before the game ends. There are deliberately
 # no turn timings: a turn waits for a person, never for a clock.
 GAME_DEFAULT_ROUNDS = env.int("GAME_DEFAULT_ROUNDS", default=3)
@@ -206,6 +221,11 @@ LOBBY_ACTIVE_MINUTES = env.int("LOBBY_ACTIVE_MINUTES", default=10)
 
 # Server-only credentials. Off until the operator supplies a key and enables AI.
 AI_PLAYERS_ENABLED = env.bool("AI_PLAYERS_ENABLED", default=False)
+AI_PROVIDER = env("AI_PROVIDER", default="openai").strip().lower()
+ANTHROPIC_AUTH_TOKEN = env("ANTHROPIC_AUTH_TOKEN", default="")
+ANTHROPIC_BASE_URL = env("ANTHROPIC_BASE_URL", default="https://api.anthropic.com").rstrip("/")
+ANTHROPIC_MODEL = env("ANTHROPIC_MODEL", default="")
+ANTHROPIC_API_VERSION = env("ANTHROPIC_API_VERSION", default="2023-06-01")
 OPENAI_API_KEY = env("OPENAI_API_KEY", default="")
 OPENAI_BASE_URL = env("OPENAI_BASE_URL", default="https://api.openai.com/v1").rstrip("/")
 # Server-only headers required by some Responses-compatible providers.
@@ -308,6 +328,10 @@ LOGGING = {
 # --------------------------------------------------------------------------
 
 SENTRY_DSN = env("SENTRY_DSN")
+REWARDED_ADS_ENABLED = env.bool("REWARDED_ADS_ENABLED", default=False)
+REWARDED_AD_PROVIDER = env("REWARDED_AD_PROVIDER", default="")
+REWARDED_ITEM_KEY = env("REWARDED_ITEM_KEY", default="")
+REWARDED_AD_DAILY_LIMIT = env.int("REWARDED_AD_DAILY_LIMIT", default=1)
 if SENTRY_DSN:
     import sentry_sdk
 

@@ -25,6 +25,7 @@ class ConversationStatus(models.TextChoices):
 
 
 class MessageType(models.TextChoices):
+    ITEM = "ITEM", "هدیه یا استیکر"
     ATTACHMENT = "ATTACHMENT", "پیوست"
     TEXT = "TEXT", "متن"
     SYSTEM = "SYSTEM", "سیستمی"
@@ -50,6 +51,10 @@ class Conversation(models.Model):
 
     code = models.CharField(max_length=CODE_LENGTH, unique=True, null=True, blank=True)
     max_players = models.PositiveSmallIntegerField(default=8)
+    # A single read-only inbox for notices sent by the application team. It is
+    # still a conversation so it gets the same history, unread count and
+    # delivery guarantees as every other chat.
+    is_system = models.BooleanField(default=False, db_index=True)
 
     # Whoever opened the room — the person who created it, or the first of a
     # matched group. A room stays open until they close it, so this has to be
@@ -74,6 +79,17 @@ class Conversation(models.Model):
     class Meta:
         ordering = ("-last_message_at", "-created_at")
         indexes = [models.Index(fields=["type", "status"])]
+        permissions = [
+            ("view_chat_transcript", "Can view complete chat transcripts"),
+            ("view_chat_transcript_media", "Can view media in chat transcripts"),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["owner"],
+                condition=models.Q(is_system=True, owner__isnull=False),
+                name="unique_system_conversation_owner",
+            ),
+        ]
 
     def __str__(self) -> str:
         return f"{self.type} {self.code or self.id}"

@@ -34,7 +34,8 @@ class InvitationTests(TestCase):
         empty = User.objects.create_user(username="empty")
         Block.objects.create(blocker=self.c, blocked=self.a)
         with patch("apps.chat.presence.app_online_ids", return_value=[self.a.pk, self.b.pk, self.c.pk, bot.pk, empty.pk]):
-            with self.assertNumQueries(1):
+            # Two bounded samples plus batched VIP and cosmetic lookups.
+            with self.assertNumQueries(4):
                 self.assertEqual([p.pk for p in matchmaking.recently_active(self.a)], [self.b.pk])
             data = self.client.get("/api/lobby/").data
             self.assertEqual([p["id"] for p in data["active_people"]], [self.b.pk])

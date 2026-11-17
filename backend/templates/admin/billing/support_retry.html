@@ -1,0 +1,5 @@
+{% extends "admin/billing/base.html" %}
+{% block finance_content %}
+<section class="finance-panel support-form"><h2>نتیجهٔ عملیات هنوز مشخص نیست</h2><p>با همین دکمه دوباره بررسی کن؛ شناسهٔ عملیات حفظ می‌شود تا اعتبار دوباره تغییر نکند. اگر مشکل ادامه داشت، سابقهٔ عملیات را بررسی کن.</p>
+<form method="post">{% csrf_token %}<input type="hidden" name="confirmation" value="{{ confirmation }}"><button type="submit" class="primary">تلاش دوباره با همان درخواست</button></form></section>
+{% endblock %}

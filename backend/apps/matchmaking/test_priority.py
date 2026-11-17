@@ -1,6 +1,7 @@
 from datetime import date, timedelta
 from unittest.mock import patch
 
+from django.conf import settings
 from django.test import TestCase, override_settings
 from django.utils import timezone
 
@@ -67,6 +68,39 @@ class GenderQueuePriorityTests(TestCase):
         girl = self.ticket("F", self.quick)
         services._match_once()
         self.matched_together(quick, girl)
+
+    def test_players_with_an_active_chat_are_not_matched_again(self):
+        first = self.ticket("M", self.quick)
+        second = self.ticket("F", self.quick)
+        conversation = Conversation.objects.create(type="ROOM", status="ACTIVE")
+        Participant.objects.bulk_create([
+            Participant(conversation=conversation, user=first.user),
+            Participant(conversation=conversation, user=second.user),
+        ])
+
+        result = services._match_once()
+
+        first.refresh_from_db()
+        second.refresh_from_db()
+        self.assertEqual(first.state, "QUEUED")
+        self.assertEqual(second.state, "QUEUED")
+        self.assertEqual(result["groups"], 0)
+
+    def test_player_who_left_an_old_chat_can_be_matched_again(self):
+        first = self.ticket("M", self.quick)
+        second = self.ticket("F", self.quick)
+        conversation = Conversation.objects.create(type="ROOM", status="ACTIVE")
+        Participant.objects.bulk_create([
+            Participant(conversation=conversation, user=first.user),
+            Participant(conversation=conversation, user=second.user, left_at=timezone.now()),
+        ])
+        Conversation.objects.filter(pk=conversation.pk).update(
+            created_at=timezone.now() - timedelta(minutes=settings.MATCH_RECENT_PARTNER_MINUTES + 1)
+        )
+
+        services._match_once()
+
+        self.matched_together(first, second)
 
     def test_blocked_filtered_waiter_does_not_hold_up_quick_pair(self):
         quick = self.ticket("M", self.quick, seconds=15)

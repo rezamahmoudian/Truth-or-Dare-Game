@@ -13,6 +13,7 @@ from apps.matchmaking import services as matchmaking
 from apps.matchmaking.models import MatchMode, MatchTicket
 from apps.users import invitations, social
 from apps.users.models import User, Block
+from apps.core.errors import DomainError
 
 
 @override_settings(AI_PLAYERS_ENABLED=False, CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}})
@@ -54,6 +55,19 @@ class PairConversationTests(TestCase):
         again = self.client.post(f"/api/friends/{self.a.pk}/conversation/")
         self.assertEqual(response.data, again.data)
         self.assertEqual(Conversation.objects.count(), 1)
+
+    def test_client_id_cannot_reconcile_another_players_message(self):
+        room = self.room()
+        first, created = chat.post_message(
+            conversation=room, sender=self.a, body="اول", client_id="same-key"
+        )
+        self.assertTrue(created)
+        with self.assertRaises(DomainError) as error:
+            chat.post_message(
+                conversation=room, sender=self.b, body="دوم", client_id="same-key"
+            )
+        self.assertEqual(error.exception.code, "invalid_client_id")
+        self.assertEqual(Message.objects.filter(conversation=room).count(), 1)
 
     def test_friend_message_reuses_game_history_without_acceptance_messages(self):
         room = self.room()

@@ -39,6 +39,8 @@ class Prompt(models.Model):
     """
 
     type = models.CharField(max_length=5, choices=PromptType.choices)
+    pack = models.ForeignKey("billing.DigitalItem", on_delete=models.PROTECT, null=True, blank=True,
+                             limit_choices_to={"kind": "PACK"}, related_name="prompts")
     text = models.TextField(unique=True)
     category = models.CharField(
         max_length=10, choices=Category.choices, default=Category.FRIENDLY
@@ -84,6 +86,44 @@ class Prompt(models.Model):
     def __str__(self) -> str:
         return f"[{self.type}/{self.intensity}] {self.text[:50]}"
 
+    def clean(self):
+        from django.core.exceptions import ValidationError
+        if self.pack_id and self.pack.kind != "PACK":
+            raise ValidationError({"pack": "فقط بستهٔ سؤال مجاز است."})
+        if self.pk and self.pack_id and Prompt.objects.filter(pk=self.pk, pack__isnull=True).exists():
+            raise ValidationError({"pack": "سؤال رایگان موجود را نمی‌توان پشت خرید قرار داد؛ سؤال تازه بسازید."})
+
+
+class PromptFeedbackValue(models.TextChoices):
+    POSITIVE = "POSITIVE", "مناسب بود"
+    NEGATIVE = "NEGATIVE", "مناسب نبود"
+
+
+class PromptFeedback(models.Model):
+    """A user's quality vote for a game question.
+
+    The vote belongs to the prompt rather than a particular game session, so
+    moderators get a useful signal over time.  The unique constraint makes a
+    repeated tap an update instead of inflating the totals.
+    """
+
+    prompt = models.ForeignKey(Prompt, on_delete=models.CASCADE, related_name="feedbacks")
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="prompt_feedbacks")
+    value = models.CharField(max_length=8, choices=PromptFeedbackValue.choices)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["prompt", "user"], name="unique_prompt_feedback_user"
+            )
+        ]
+        indexes = [models.Index(fields=["prompt", "value"])]
+
+    def __str__(self) -> str:
+        return f"{self.user_id} → {self.prompt_id}: {self.value}"
+
 
 class SessionStatus(models.TextChoices):
     ACTIVE = "ACTIVE", "در جریان"
@@ -110,6 +150,7 @@ class GameSession(models.Model):
     conversation = models.ForeignKey(
         "chat.Conversation", on_delete=models.CASCADE, related_name="game_sessions"
     )
+    prompt_pack = models.ForeignKey("billing.DigitalItem", on_delete=models.PROTECT, null=True, blank=True)
     status = models.CharField(
         max_length=8, choices=SessionStatus.choices, default=SessionStatus.ACTIVE
     )

@@ -13,6 +13,14 @@ app.autodiscover_tasks()
 # of a gender queue priority. Two seconds is invisible to someone watching a
 # waiting screen and a twentieth of the work of a one-second tick.
 app.conf.beat_schedule = {
+    "vip-period-boundaries": {
+        "task": "apps.billing.tasks.refresh_vip_boundaries",
+        "schedule": 60.0,
+    },
+    "billing-payment-recovery": {
+        "task": "apps.billing.tasks.recover_payments",
+        "schedule": 60.0,
+    },
     "ai-pending-work": {
         "task": "apps.ai_players.tasks.recover_pending",
         "schedule": 10.0,

@@ -1,4 +1,10 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { VipName } from "@/ui/Vip";
+import { usePublicLook } from "@/store/vip";
+import { ChatItemsSheet } from "./ChatItemsSheet";
+import { ItemVisual } from "@/features/shop/ItemVisual";
+import type { DigitalItem } from "@/lib/billingApi";
+import { useInventory } from "@/features/shop/useInventory";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
 import { PlayersSheet } from "@/features/chat/PlayersSheet";
@@ -43,6 +49,7 @@ export function ChatRoomScreen() {
   const navigate = useNavigate();
 
   const me = useSession((s) => s.user);
+  const look = usePublicLook(me?.vip)?.cosmetics;
   const rawMessages = useChat((s) => s.messages[id]) ?? NO_MESSAGES;
   const messages = useMemo(() => rawMessages.filter(
     (message) => !(message.type === "SYSTEM" && message.meta?.ai_error),
@@ -59,13 +66,38 @@ export function ChatRoomScreen() {
   const [conversation, setConversation] = useState<Conversation | null>(null);
   const [showPlayers, setShowPlayers] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
+  const [showItems, setShowItems] = useState(false);
+  const [conversationError, setConversationError] = useState("");
+  const conversationRequest = useRef(0);
   useEffect(() => { void loadInvitations().catch(() => undefined); }, [loadInvitations]);
 
+  // Keep the room metadata and the message history as separate requests, but
+  // never leave the screen looking like an empty room when metadata failed.
+  // This used to swallow the error, which made the header show a generic
+  // "گفتگو" and left a composer that could not actually send anything.
+  const loadConversation = useCallback(async () => {
+    const request = ++conversationRequest.current;
+    try {
+      const result = await api.getConversation(id);
+      if (request !== conversationRequest.current) return;
+      setConversation(result);
+      setConversationError("");
+    } catch (error) {
+      if (request === conversationRequest.current) {
+        setConversationError("گفتگو دریافت نشد؛ اتصال را بررسی کن و دوباره تلاش کن.");
+      }
+      throw error;
+    }
+  }, [id]);
+
   useEffect(() => {
+    conversationRequest.current += 1;
+    setConversation(null);
+    setConversationError("");
     void openConversation(id);
-    void api.getConversation(id).then(setConversation).catch(() => undefined);
+    void loadConversation().catch(() => undefined);
     return () => closeConversation();
-  }, [id, openConversation, closeConversation]);
+  }, [id, openConversation, closeConversation, loadConversation]);
 
   // Joins and departures arrive as system messages, and they change who is in
   // the room. Without this the header and the game panel keep showing the
@@ -74,23 +106,24 @@ export function ChatRoomScreen() {
   const lastSystemId = lastSystemMessageId(messages);
   useEffect(() => {
     if (!lastSystemId) return;
-    void api.getConversation(id).then(setConversation).catch(() => undefined);
-  }, [id, lastSystemId]);
+    void loadConversation().catch(() => undefined);
+  }, [lastSystemId, loadConversation]);
 
   const typingIds = typingUserIds(typing, me?.id ?? 0);
   const isOwner =
     conversation?.type === "ROOM" && conversation.owner_id === me?.id;
   const isClosed = conversation?.status === "CLOSED";
+  const isSystem = conversation?.is_system === true;
 
   const other = conversation?.participants.find((p) => p.id !== me?.id);
   const ai = conversation?.participants.find((p) => p.is_ai);
   const title =
-    ai ? ai.display_name : conversation && conversation.max_players > 2
+    isSystem ? "سیستم" : ai ? ai.display_name : conversation && conversation.max_players > 2
       ? `جمع ${conversation.code ?? "دوستان"}`
       : (other?.display_name ?? "گفتگو");
 
   const subtitle =
-    status !== "open"
+    isSystem ? "پیام‌های سیستم" : status !== "open"
       ? "در حال اتصال…"
       : ai ? (isClosed ? "گفتگو بسته شده" : "گفتگو و بازی")
       : typingIds.length > 0
@@ -100,7 +133,7 @@ export function ChatRoomScreen() {
 
   return (
     <Screen
-      className="chat-screen chat-room"
+      className={`chat-screen chat-room ${look?.THEME ? `chat-look-${look.THEME.visual}` : ""}`}
       scroll={false}
       header={
         <header
@@ -120,17 +153,18 @@ export function ChatRoomScreen() {
               tap that turns a finished game into a friend request. */}
           <button
             type="button"
-            onClick={() => { if (other && conversation && conversation.max_players === 2) navigate(`/people/${other.id}`); else setShowPlayers(true); }}
+            onClick={() => { if (isSystem) return; if (other && conversation && conversation.max_players === 2) navigate(`/people/${other.id}`); else setShowPlayers(true); }}
+            disabled={isSystem}
             className="press flex min-w-0 flex-1 items-center gap-2.5 rounded-field py-1 text-start"
           >
-            <Avatar
+            {isSystem ? <span className="chat-system-avatar size-[38px]"><ChatIcon name="system" /></span> : <Avatar vip={other?.vip}
               photoUrl={other?.avatar_url} avatarKey={other?.avatar || "a1"}
               name={title}
               size={38}
-            />
+            />}
             <span className="min-w-0">
               <span className="block truncate text-[16px] font-bold leading-tight">
-                {title}
+                <VipName vip={conversation?.max_players === 2 ? other?.vip : undefined}>{title}</VipName>
               </span>
               <span
                 className={`block truncate text-[12px] leading-tight ${
@@ -142,9 +176,10 @@ export function ChatRoomScreen() {
             </span>
           </button>
 
-          <ChatGameLauncher key={id} conversation={conversation} selfId={me?.id ?? 0} />
-          <button type="button" className="chat-header-more grid size-11 shrink-0 place-items-center rounded-full" aria-label="گزینه‌های گفتگو" aria-expanded={showMenu} onClick={() => setShowMenu(v => !v)}><ChatIcon name="more" /></button>
-          {showMenu && <div className="chat-room-menu flex w-full flex-wrap items-center gap-2 p-2">
+          {!isSystem && <ChatGameLauncher key={id} conversation={conversation} selfId={me?.id ?? 0} />}
+          {!isSystem && <button type="button" className="chat-header-more grid size-11 shrink-0 place-items-center rounded-full" aria-label="گزینه‌های گفتگو" aria-expanded={showMenu} onClick={() => setShowMenu(v => !v)}><ChatIcon name="more" /></button>}
+          {showMenu && !isSystem && <div className="chat-room-menu flex w-full flex-wrap items-center gap-2 p-2">
+          {!isClosed && <button type="button" className="min-h-11 rounded-field px-3 text-sm" onClick={() => { setShowItems(true); setShowMenu(false); }}>🎁 هدیه و استیکر</button>}
           <button type="button" className="min-h-11 rounded-field px-3 text-sm" onClick={() => { setShowPlayers(true); setShowMenu(false); }}>دیدن پروفایل بازیکن‌ها</button>
           {conversation?.code && !isClosed && <CopyCode code={conversation.code} />}
           {isOwner && !isClosed && (
@@ -157,8 +192,12 @@ export function ChatRoomScreen() {
         </header>
       }
       footer={
-        isClosed ? (
+        isSystem ? (
+          <SystemNotice />
+        ) : isClosed ? (
           <ClosedNotice />
+        ) : !conversation ? (
+          <ConversationUnavailable error={conversationError} onRetry={() => void loadConversation()} />
         ) : (
           <>
             <GamePanel
@@ -177,15 +216,23 @@ export function ChatRoomScreen() {
         )
       }
     >
-      <MessageList
+      {showItems && conversation && <ChatItemsSheet key={id} conversation={conversation} onClose={() => setShowItems(false)} />}
+      {conversationError && !conversation ? (
+        <div className="flex h-full items-center justify-center px-6 text-center">
+          <div className="max-w-sm">
+            <p className="text-sm leading-7 text-bad" role="alert">{conversationError}</p>
+            <button type="button" className="mt-3 min-h-11 rounded-field bg-surface-2 px-4 text-sm text-brand-soft" onClick={() => void loadConversation()}>تلاش دوباره</button>
+          </div>
+        </div>
+      ) : <MessageList
         messages={messages}
         loading={loading}
         selfId={me?.id ?? 0}
         conversationId={id}
         onReachTop={() => void loadOlder(id)}
         groupChat={(conversation?.max_players ?? 2) > 2}
-        playCard={<ChatPlayCard key={id} conversation={conversation} selfId={me?.id ?? 0} />}
-      />
+        playCard={isSystem ? null : <ChatPlayCard key={id} conversation={conversation} selfId={me?.id ?? 0} />}
+      />}
 
       {showPlayers && (
         <PlayersSheet
@@ -278,6 +325,26 @@ function ClosedNotice() {
       style={{ paddingBottom: "max(1rem, env(safe-area-inset-bottom))" }}
     >
       این روم بسته شده است. گفتگوها باقی می‌مانند ولی پیام جدیدی ارسال نمی‌شود.
+    </div>
+  );
+}
+
+function SystemNotice() {
+  return (
+    <div
+      className="bar-blur shrink-0 border-t border-line-soft px-6 py-4 text-center text-[13px] leading-relaxed text-muted"
+      style={{ paddingBottom: "max(1rem, env(safe-area-inset-bottom))" }}
+    >
+      این گفتگو فقط برای دریافت پیام‌های سیستم است.
+    </div>
+  );
+}
+
+function ConversationUnavailable({ error, onRetry }: { error: string; onRetry: () => void }) {
+  return (
+    <div className="bar-blur shrink-0 border-t border-line-soft px-6 py-3 text-center text-[12px] leading-relaxed text-muted">
+      <span>{error || "در حال دریافت گفتگو…"}</span>
+      {error && <button type="button" className="ms-2 min-h-10 rounded-field bg-surface-2 px-3 text-brand-soft" onClick={onRetry}>تلاش دوباره</button>}
     </div>
   );
 }
@@ -449,6 +516,12 @@ function HistorySkeleton() {
   );
 }
 
+function SpecialReactions({ onSelect }: { onSelect: (emoji: string) => void }) {
+  const { data } = useInventory();
+  const emojis = [...new Set(data?.items.filter(row => row.item.kind === "REACTION").map(row => row.item.visual))];
+  return <>{emojis.map(emoji => <button className="press min-h-11 px-1 text-[19px]" type="button" aria-label={`واکنش ویژه ${emoji}`} key={emoji} onClick={() => onSelect(emoji)}><Emoji value={emoji} /></button>)}</>;
+}
+
 function MessageRow({
   message,
   selfId,
@@ -463,9 +536,12 @@ function MessageRow({
   groupChat: boolean;
 }) {
   const [showActions, setShowActions] = useState(false);
+  const [showPromptFeedback, setShowPromptFeedback] = useState(false);
   const [reporting, setReporting] = useState(false);
   const toggleReaction = useChat((s) => s.toggleReaction);
+  const submitPromptFeedback = useChat((s) => s.submitPromptFeedback);
   const retryMessage = useChat((s) => s.retryMessage);
+  const effect = usePublicLook(message.sender?.vip)?.cosmetics?.EFFECT?.visual;
 
   if (message.type === "SYSTEM") {
     return (
@@ -481,10 +557,26 @@ function MessageRow({
   // not from a person, and they are what the next few messages are about.
   if (message.type === "GAME_PROMPT") {
     const isDare = message.meta?.choice === "DARE";
+    const feedback = (message.meta?.feedback ?? {}) as {
+      positive_count?: number;
+      negative_count?: number;
+      user_value?: "POSITIVE" | "NEGATIVE" | null;
+    };
+    const positiveCount = feedback.positive_count ?? 0;
+    const negativeCount = feedback.negative_count ?? 0;
     return (
       // The one card in the app that is literally a card being turned over.
       <div className="chat-question-card animate-card-in my-3">
         <div
+          role="button"
+          tabIndex={0}
+          onClick={() => setShowPromptFeedback((open) => !open)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              setShowPromptFeedback((open) => !open);
+            }
+          }}
           className={`relative overflow-hidden rounded-card border p-4 text-center ${
             isDare
               ? "border-ok/30 bg-gradient-to-b from-ok/15 to-transparent"
@@ -499,6 +591,35 @@ function MessageRow({
             {message.meta.play_mode === "DEEP_TALK" ? (message.meta.category === "BOLD" ? "جسورانه 😏" : "خصوصی 🤫") : isDare ? "جرئت" : "حقیقت"}
           </span>
           <p className="text-[16px] font-semibold leading-relaxed">{message.body}</p>
+          <p className="mt-2 text-[11px] text-faint">برای ثبت بازخورد روی سؤال بزن</p>
+          {showPromptFeedback && (
+            <div
+              className="animate-rise mt-3 border-t border-line/60 pt-3"
+              onClick={(event) => event.stopPropagation()}
+              role="group"
+              aria-label="بازخورد سؤال"
+            >
+              <p className="mb-2 text-[12px] font-semibold text-muted">این سؤال چطور بود؟</p>
+              <div className="flex items-center justify-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => submitPromptFeedback(conversationId, message.id, "POSITIVE")}
+                  className={`press rounded-full px-3 py-1.5 text-[12px] font-semibold ${feedback.user_value === "POSITIVE" ? "bg-ok/20 text-ok ring-1 ring-ok/40" : "surface-raised text-muted"}`}
+                  aria-pressed={feedback.user_value === "POSITIVE"}
+                >
+                  👍 مناسب بود {positiveCount > 0 && <span className="ms-1 opacity-70">{faNum(positiveCount)}</span>}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => submitPromptFeedback(conversationId, message.id, "NEGATIVE")}
+                  className={`press rounded-full px-3 py-1.5 text-[12px] font-semibold ${feedback.user_value === "NEGATIVE" ? "bg-bad/20 text-bad ring-1 ring-bad/40" : "surface-raised text-muted"}`}
+                  aria-pressed={feedback.user_value === "NEGATIVE"}
+                >
+                  👎 مناسب نبود {negativeCount > 0 && <span className="ms-1 opacity-70">{faNum(negativeCount)}</span>}
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     );
@@ -513,7 +634,7 @@ function MessageRow({
     <div
       dir="ltr"
       data-mine={mine}
-      className={`chat-message-row animate-rise flex gap-2 ${grouped ? "mt-0.5" : "mt-2.5"} ${
+      className={`chat-message-row animate-rise flex gap-2 ${effect ? `message-effect-${effect}` : ""} ${grouped ? "mt-0.5" : "mt-2.5"} ${
         mine ? "justify-end" : "justify-start"
       }`}
     >
@@ -522,7 +643,7 @@ function MessageRow({
           <span className="w-8 shrink-0" aria-hidden />
         ) : (
           <Link to={`/people/${message.sender?.id}`} aria-label={`پروفایل ${message.sender?.display_name ?? "بازیکن"}`}>
-          <Avatar
+          <Avatar vip={message.sender?.vip}
             photoUrl={message.sender?.avatar_url} avatarKey={message.sender?.avatar || "a1"}
             name={message.sender?.display_name ?? ""}
             size={32}
@@ -533,7 +654,7 @@ function MessageRow({
       <div dir="rtl" className={`chat-message-content flex max-w-[85%] min-w-0 flex-col ${mine ? "items-end" : "items-start"}`}>
         {groupChat && !mine && !grouped && message.sender && (
           <Link to={`/people/${message.sender.id}`} className="mb-0.5 px-1 text-[11.5px] font-semibold text-muted">
-            {message.sender.display_name}
+            <VipName vip={message.sender.vip}>{message.sender.display_name}</VipName>
           </Link>
         )}
 
@@ -556,7 +677,7 @@ function MessageRow({
             message.is_deleted ? "italic opacity-50" : ""
           }`}
         >
-          <span>{message.is_deleted ? "پیام حذف شد" : <EmojiText text={message.body} />}</span>
+          {message.type === "ITEM" && !message.is_deleted && message.meta.item ? <span className="chat-digital-item"><ItemVisual item={message.meta.item as DigitalItem} /><strong>{message.body}</strong><small>{(message.meta.item as DigitalItem).kind === "GIFT" ? `هدیه برای ${(message.meta.item as { recipient_name?: string }).recipient_name || "هم‌بازی"}` : ""}</small></span> : <span>{message.is_deleted ? "پیام حذف شد" : <EmojiText text={message.body} />}</span>}
           <span className="chat-bubble-time block" dir="ltr">{pending ? "در حال ارسال…" : clockTime(message.created_at)}{mine && !pending && !failed && <span className="ms-1" aria-label="ارسال شده">✓</span>}</span>
         </button>}
 
@@ -595,7 +716,8 @@ function MessageRow({
         )}
 
         {showActions && !pending && (
-          <div className="animate-rise surface-raised mt-1 flex items-center gap-1 rounded-full px-2 py-1">
+          <div className="animate-rise surface-raised mt-1 flex max-w-full flex-wrap items-center gap-1 rounded-2xl px-2 py-1">
+            <SpecialReactions onSelect={emoji => { toggleReaction(conversationId, message.id, emoji, (message.reactions[emoji] ?? []).includes(selfId)); setShowActions(false); }} />
             {QUICK_REACTIONS.map((emoji) => (
               <button
                 key={emoji}

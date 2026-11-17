@@ -86,6 +86,7 @@ type ChatState = {
   retryMessage: (id: string, clientId: string) => void;
   setTyping: (id: string, isTyping: boolean) => void;
   toggleReaction: (id: string, messageId: number, emoji: string, has: boolean) => void;
+  submitPromptFeedback: (id: string, messageId: number, value: "POSITIVE" | "NEGATIVE") => void;
   markRead: (id: string) => void;
   deleteConversation: (id: string) => Promise<void>;
   totalUnread: () => number;
@@ -199,6 +200,50 @@ export const useChat = create<ChatState>((set, get) => ({
                   if (users.size) reactions[emoji] = [...users];
                   else delete reactions[emoji];
                   return { ...message, reactions };
+                }),
+              },
+            };
+          });
+          break;
+        }
+
+        case "game.prompt_feedback": {
+          const {
+            conversation_id,
+            message_id,
+            positive_count,
+            negative_count,
+            user_value,
+          } = data as {
+            conversation_id: string;
+            message_id: number;
+            positive_count: number;
+            negative_count: number;
+            user_value?: "POSITIVE" | "NEGATIVE" | null;
+          };
+          set((state) => {
+            const list = state.messages[conversation_id];
+            if (!list) return {};
+            return {
+              messages: {
+                ...state.messages,
+                [conversation_id]: list.map((message) => {
+                  if (isPending(message) || message.id !== message_id) return message;
+                  const existing = (message.meta.feedback ?? {}) as Record<string, unknown>;
+                  return {
+                    ...message,
+                    meta: {
+                      ...message.meta,
+                      feedback: {
+                        ...existing,
+                        positive_count,
+                        negative_count,
+                        // Broadcasts omit this field for other users; retain
+                        // their own vote instead of clearing it.
+                        user_value: user_value === undefined ? (existing.user_value ?? null) : user_value,
+                      },
+                    },
+                  };
                 }),
               },
             };
@@ -358,6 +403,14 @@ export const useChat = create<ChatState>((set, get) => ({
       message_id: messageId,
       emoji,
       op: has ? "remove" : "add",
+    });
+  },
+
+  submitPromptFeedback(id, messageId, value) {
+    socket.send("game.prompt_feedback", {
+      conversation_id: id,
+      message_id: messageId,
+      value,
     });
   },
 

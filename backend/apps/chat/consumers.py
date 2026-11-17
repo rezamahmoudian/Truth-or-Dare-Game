@@ -31,6 +31,22 @@ RATE_WINDOW_SECONDS = 10
 RATE_MAX_ACTIONS = 40
 
 
+def _data_int(data, name: str, *, default: int = 0, minimum: int = 0) -> int:
+    """Parse numeric socket fields into a client error, never a 500."""
+    raw = data.get(name)
+    if raw in (None, ""):
+        return default
+    if isinstance(raw, bool) or (isinstance(raw, float) and not raw.is_integer()):
+        raise DomainError("bad_number", f"مقدار {name} نامعتبر است.")
+    try:
+        value = int(raw)
+    except (TypeError, ValueError) as exc:
+        raise DomainError("bad_number", f"مقدار {name} نامعتبر است.") from exc
+    if value < minimum:
+        raise DomainError("bad_number", f"مقدار {name} نامعتبر است.")
+    return value
+
+
 class AppConsumer(AsyncJsonWebsocketConsumer):
     async def connect(self) -> None:
         self.user = self.scope.get("user")
@@ -99,6 +115,7 @@ class AppConsumer(AsyncJsonWebsocketConsumer):
             "game.confirm": self._on_game_confirm,
             "game.force_next": self._on_game_force_next,
             "game.stop": self._on_game_stop,
+            "game.prompt_feedback": self._on_prompt_feedback,
             "mm.enqueue": self._on_mm_enqueue,
             "mm.cancel": self._on_mm_cancel,
         }
@@ -190,7 +207,7 @@ class AppConsumer(AsyncJsonWebsocketConsumer):
 
     @database_sync_to_async
     def _payload(self, message) -> dict:
-        return message_payload(message)
+        return message_payload(message, self.user)
 
     async def _on_typing(self, data) -> None:
         conversation_id = str(data.get("conversation_id") or "")
@@ -215,13 +232,13 @@ class AppConsumer(AsyncJsonWebsocketConsumer):
         await database_sync_to_async(services.mark_read)(
             self.user,
             str(data.get("conversation_id") or ""),
-            int(data.get("up_to_message_id") or 0),
+            _data_int(data, "up_to_message_id"),
         )
 
     async def _on_react(self, data) -> None:
         await database_sync_to_async(services.set_reaction)(
             self.user,
-            int(data.get("message_id") or 0),
+            _data_int(data, "message_id", minimum=1),
             str(data.get("emoji") or ""),
             str(data.get("op") or "add"),
         )
@@ -237,6 +254,10 @@ class AppConsumer(AsyncJsonWebsocketConsumer):
 
     def _start_game(self, data):
         from apps.game import services as game_services
+        from apps.game.views import GameStartSerializer
+        options = GameStartSerializer(data={key: data[key] for key in ("category", "max_intensity", "play_mode", "replace_session_id", "prompt_pack_id") if key in data})
+        if not options.is_valid():
+            raise DomainError("invalid_game", "تنظیمات بازی معتبر نیست.")
 
         participant = services.active_participant(
             self.user, str(data.get("conversation_id") or "")
@@ -244,43 +265,42 @@ class AppConsumer(AsyncJsonWebsocketConsumer):
         return game_services.start_game(
             self.user,
             participant.conversation,
-            category=str(data.get("category") or ""),
-            max_intensity=int(data.get("max_intensity") or 2),
+            **options.validated_data,
         )
 
     async def _on_game_choose(self, data) -> None:
         from apps.game import services as game_services
 
         await database_sync_to_async(game_services.choose)(
-            self.user, int(data.get("turn_id") or 0), str(data.get("choice") or "")
+            self.user, _data_int(data, "turn_id", minimum=1), str(data.get("choice") or "")
         )
 
     async def _on_game_answer(self, data) -> None:
         from apps.game import services as game_services
 
         await database_sync_to_async(game_services.answer)(
-            self.user, int(data.get("turn_id") or 0), str(data.get("body") or "")
+            self.user, _data_int(data, "turn_id", minimum=1), str(data.get("body") or "")
         )
 
     async def _on_game_skip(self, data) -> None:
         from apps.game import services as game_services
 
         await database_sync_to_async(game_services.skip)(
-            self.user, int(data.get("turn_id") or 0)
+            self.user, _data_int(data, "turn_id", minimum=1)
         )
 
     async def _on_game_confirm(self, data) -> None:
         from apps.game import services as game_services
 
         await database_sync_to_async(game_services.confirm)(
-            self.user, int(data.get("turn_id") or 0)
+            self.user, _data_int(data, "turn_id", minimum=1)
         )
 
     async def _on_game_force_next(self, data) -> None:
         from apps.game import services as game_services
 
         await database_sync_to_async(game_services.force_next)(
-            self.user, int(data.get("turn_id") or 0)
+            self.user, _data_int(data, "turn_id", minimum=1)
         )
 
     async def _on_game_stop(self, data) -> None:
@@ -290,13 +310,28 @@ class AppConsumer(AsyncJsonWebsocketConsumer):
             self.user, str(data.get("conversation_id") or "")
         )
 
+    async def _on_prompt_feedback(self, data) -> None:
+        from apps.game import services as game_services
+
+        payload = await database_sync_to_async(game_services.set_prompt_feedback)(
+            self.user,
+            str(data.get("conversation_id") or ""),
+            _data_int(data, "message_id", minimum=1),
+            str(data.get("value") or ""),
+        )
+        # The conversation broadcast contains aggregate counts.  This direct
+        # response also carries this user's vote, so another participant never
+        # sees a value that belongs to someone else.
+        await self.send_json({"type": "game.prompt_feedback", "data": payload})
+
     # -- matchmaking ------------------------------------------------------
 
     async def _on_mm_enqueue(self, data) -> None:
         from apps.matchmaking import services as match_services
 
         await database_sync_to_async(match_services.enqueue)(
-            self.user, str(data.get("mode") or "")
+            self.user, str(data.get("mode") or ""), ai_consent=data.get("ai_consent") is True,
+            use_credit=data.get("use_credit") is True,
         )
 
     async def _on_mm_cancel(self, data) -> None:

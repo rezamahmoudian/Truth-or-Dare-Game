@@ -3,6 +3,8 @@ import { ApiError } from "@/lib/auth";
 import type { Conversation } from "@/lib/types";
 import { useGame } from "@/store/game";
 import { useSocial } from "@/store/social";
+import { useInventory } from "@/features/shop/useInventory";
+import { Link } from "react-router-dom";
 
 export function ChatGameLauncher({ conversation, selfId }: { conversation: Conversation | null; selfId: number }) {
   const [open, setOpen] = useState(false);
@@ -19,6 +21,8 @@ export function ChatGameLauncher({ conversation, selfId }: { conversation: Conve
 }
 
 function GamePicker({ conversationId, isFriend, onClose }: { conversationId: string; isFriend: boolean; onClose: () => void }) {
+  const { data: inventory } = useInventory();
+  const [packId, setPackId] = useState<number | undefined>();
   const dialog = useRef<HTMLDialogElement>(null);
   const [mode, setMode] = useState<"CLASSIC" | "DEEP_TALK">("CLASSIC");
   const [busy, setBusy] = useState(false);
@@ -42,7 +46,15 @@ function GamePicker({ conversationId, isFriend, onClose }: { conversationId: str
       const session = useGame.getState().byConversation[conversationId]?.session;
       setReplaceId(session?.status === "ACTIVE" ? session.id : undefined);
       setLoading(false);
-    }).catch(() => { if (active) setError("دریافت وضعیت بازی ممکن نشد؛ پنجره را ببند و دوباره امتحان کن."); });
+    }).catch(() => {
+      // Do not leave the primary action disabled forever when the status
+      // request fails. A temporary outage should be recoverable from this
+      // sheet; the start endpoint remains authoritative about an active game.
+      if (active) {
+        setLoading(false);
+        setError("دریافت وضعیت بازی ممکن نشد؛ می‌توانی دوباره شروع را امتحان کنی.");
+      }
+    });
     return () => { active = false; };
   }, [conversationId, load]);
   return <dialog ref={dialog} className="chat-game-dialog" aria-labelledby="game-picker-title" onCancel={e => { if (busy) e.preventDefault(); else onClose(); }}>
@@ -52,12 +64,15 @@ function GamePicker({ conversationId, isFriend, onClose }: { conversationId: str
       {isFriend ? <button type="button" disabled={busy} aria-pressed={deep} className="game-mode-deep" onClick={() => setMode("DEEP_TALK")}><span className="game-mode-icon" aria-hidden>😏</span><span><em>فقط بین خودمون</em><strong>گفت‌وگوی عمیق</strong><small>یه کم خصوصی‌تر… یه کم جسورتر</small></span><i aria-hidden>{deep ? "●" : "○"}</i></button> : <p className="deep-friends-hint">گفت‌وگوی عمیق در چت دونفره، بعد از قبول دوستی باز می‌شه.</p>}
     </div>
     {deep && <p className="deep-mode-description">حرف‌هایی که معمولاً نمی‌پرسیم 😉<br />سؤال‌های خصوصی و بیشتر جسورانه؛ جواب‌ها توی همین چت. هر سؤال رو نخواستی، ردش کن.</p>}
+    <label className="block px-4 text-sm">بانک سؤال<select className="my-2 min-h-11 w-full rounded-xl bg-surface p-2" disabled={busy} value={packId ?? ""} onChange={e => setPackId(e.target.value ? Number(e.target.value) : undefined)}><option value="">سؤال‌های اصلی · رایگان</option>{inventory?.items.filter(row => row.item.kind === "PACK").map(row => <option key={row.id} value={row.item.id}>{row.item.title}</option>)}</select></label>
+    {packId && <p className="mx-4 text-xs text-muted">بستهٔ انتخابی با همهٔ سطح‌های سؤالش اجرا می‌شود؛ مخصوص بازیکنان بالای ۱۸ سال.</p>}
+    <Link className="mx-4 inline-block min-h-11 content-center text-xs text-muted" to="/shop/items">دیدن بسته‌های سؤال تازه ←</Link>
     {replaceId && <label className="game-restart-confirm"><input type="checkbox" checked={confirmed} disabled={busy} onChange={e => setConfirmed(e.target.checked)} /><span>بازی فعلی تمام شود و بازی تازه شروع شود.</span></label>}
     {error && <p role="alert" className="game-launch-error">{error}</p>}
     <button type="button" className={`game-launch-submit ${deep ? "deep" : ""}`} disabled={busy || loading || (!!replaceId && !confirmed)} onClick={async () => {
       setBusy(true); setError("");
       try {
-        await start(conversationId, deep ? 3 : 2, { play_mode: mode, ...(replaceId ? { replace_session_id: replaceId } : {}) });
+        await start(conversationId, deep || packId ? 3 : 2, { play_mode: mode, prompt_pack_id: packId, ...(replaceId ? { replace_session_id: replaceId } : {}) });
         onClose();
       } catch (e) {
         setError(e instanceof ApiError ? e.firstMessage || "شروع نشد؛ دوباره تلاش کن." : "ارتباط قطع شد؛ دوباره تلاش کن.");

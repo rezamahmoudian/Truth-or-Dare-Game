@@ -1,3 +1,4 @@
+import { VipName } from "@/ui/Vip";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 
@@ -49,7 +50,9 @@ export function ChatListScreen() {
       ) : (
         <ul className="chat-conversations">
           {conversations.map((conversation) => (
-            <ConversationRow key={conversation.id} conversation={conversation} selfId={selfId} />
+            conversation.is_system
+              ? <SystemConversationRow key={conversation.id} conversation={conversation} />
+              : <ConversationRow key={conversation.id} conversation={conversation} selfId={selfId} />
           ))}
         </ul>
       )}
@@ -58,6 +61,7 @@ export function ChatListScreen() {
 }
 
 function conversationTitle(conversation: Conversation, selfId?: number) {
+  if (conversation.is_system) return "سیستم";
   return conversation.max_players > 2 ? `جمع ${conversation.code ?? "دوستان"}` : conversation.participants.find(p => p.id !== selfId)?.display_name ?? "گفتگو";
 }
 
@@ -109,7 +113,7 @@ function ConversationRow({ conversation, selfId }: { conversation: Conversation;
   return (
     <li className="chat-conversation-row flex items-center" data-unread={conversation.unread_count > 0}>
       <Link to={other && conversation.max_players === 2 ? `/people/${other.id}` : `/c/${conversation.id}`} aria-label={other && conversation.max_players === 2 ? `پروفایل ${title}` : title} className="shrink-0 py-4 me-3">
-        <span className="chat-avatar-wrap">{conversation.max_players > 2 ? <span className="chat-group-avatar"><ChatIcon name="group" /></span> : <Avatar photoUrl={other?.avatar_url} avatarKey={other?.avatar || "a1"} name={title} size={52} />}{other && online?.includes(other.id) && <i className="chat-online-dot" aria-label="آنلاین" />}</span>
+        <span className="chat-avatar-wrap">{conversation.max_players > 2 ? <span className="chat-group-avatar"><ChatIcon name="group" /></span> : <Avatar vip={other?.vip} photoUrl={other?.avatar_url} avatarKey={other?.avatar || "a1"} name={title} size={52} />}{other && online?.includes(other.id) && <i className="chat-online-dot" aria-label="آنلاین" />}</span>
       </Link>
       <Link
         to={`/c/${conversation.id}`}
@@ -119,7 +123,7 @@ function ConversationRow({ conversation, selfId }: { conversation: Conversation;
 
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline gap-2">
-            <p className="min-w-0 flex-1 truncate text-[15.5px] font-bold">{title}</p>
+            <p className="min-w-0 flex-1 truncate text-[15.5px] font-bold"><VipName vip={conversation.max_players === 2 ? other?.vip : undefined}>{title}</VipName></p>
           </div>
           <p
             className={`truncate text-[13px] ${
@@ -148,6 +152,35 @@ function ConversationRow({ conversation, selfId }: { conversation: Conversation;
       >
         <ChatIcon name="more" />
       </button>
+    </li>
+  );
+}
+
+function SystemConversationRow({ conversation }: { conversation: Conversation }) {
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const remove = useChat((s) => s.deleteConversation);
+  if (confirming) {
+    return (
+      <li className="flex flex-wrap items-center gap-2 px-1 py-3">
+        <p className="min-w-0 flex-1 text-sm leading-relaxed text-muted">گفت‌وگوی سیستم از لیست شما پاک شود؟</p>
+        <button type="button" disabled={busy} className="press min-h-11 rounded-field bg-bad px-3 text-[12px] font-bold text-white disabled:opacity-50" onClick={async () => { setBusy(true); try { await remove(conversation.id); } catch { setError("گفتگو پاک نشد؛ دوباره تلاش کن."); } finally { setBusy(false); } }}>پاک کن</button>
+        <button type="button" className="press min-h-11 rounded-field bg-surface-2 px-3 text-[12px] text-muted" onClick={() => setConfirming(false)}>بی‌خیال</button>
+        {error && <p className="w-full text-xs text-bad" role="alert">{error}</p>}
+      </li>
+    );
+  }
+  return (
+    <li className="chat-conversation-row flex items-center" data-unread={conversation.unread_count > 0}>
+      <Link to={`/c/${conversation.id}`} aria-label="سیستم" className="shrink-0 py-4 me-3">
+        <span className="chat-avatar-wrap"><span className="chat-system-avatar"><ChatIcon name="system" /></span></span>
+      </Link>
+      <Link to={`/c/${conversation.id}`} className="flex min-w-0 flex-1 items-center gap-3 py-4 transition-colors active:bg-surface">
+        <div className="min-w-0 flex-1"><p className="truncate text-[15.5px] font-bold">سیستم</p><p className={`truncate text-[13px] ${conversation.unread_count > 0 ? "font-semibold text-text" : "text-muted"}`}>{conversation.last_message_preview || "هنوز پیامی نیست"}</p></div>
+        <span className="chat-row-meta">{conversation.last_message_at && <span className="chat-row-time">{clockTime(conversation.last_message_at)}</span>}{conversation.unread_count > 0 && <span className="chat-unread grid min-w-6 shrink-0 place-items-center rounded-full bg-brand px-1.5 py-0.5 text-[11px] font-bold text-white">{faNum(conversation.unread_count)}</span>}</span>
+      </Link>
+      <button type="button" onClick={() => setConfirming(true)} aria-label="پاک کردن گفت‌وگوی سیستم" className="press grid size-11 shrink-0 place-items-center text-lg text-faint"><ChatIcon name="more" /></button>
     </li>
   );
 }

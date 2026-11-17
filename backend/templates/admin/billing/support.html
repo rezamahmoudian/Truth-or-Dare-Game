@@ -1,0 +1,22 @@
+{% extends "admin/billing/base.html" %}
+{% block finance_content %}
+<nav class="finance-nav" aria-label="عملیات پشتیبانی">{% for link in action_links %}<a class="pill" href="{{ link.url }}" {% if link.active %}aria-current="page"{% endif %}>{{ link.label }}</a>{% endfor %}</nav>
+<section class="finance-panel support-form"><h2>{{ action_title }}</h2>
+  {% if action == 'grant' %}<p>اعتبار جبرانی یا هدیه به کیف کاربر اضافه می‌شود. این مقدار فروش یا بازپرداخت نقدی محسوب نمی‌شود.</p>
+  {% elif action == 'debit' %}<p>تعداد مشخص‌شده از همان اعتبار اختصاص‌یافته کم می‌شود. اعتبار مصرف‌شده یا رزروشده قابل کاهش نیست.</p>
+  {% elif action == 'revoke_vip' %}<p>همین دوره VIP و اعتبار استفاده‌نشده آن لغو می‌شود. تاریخ دوره‌های بعدی تغییر نمی‌کند. اگر اعتبار این دوره رزرو شده باشد، عملیات تا تعیین تکلیف مچ انجام نمی‌شود. پولی به حساب بانکی برنمی‌گردد.</p>
+  {% elif action == 'retry_delivery' %}<p>فقط سفارش دارای مدرک پرداخت تأییدشده تحویل می‌شود. تحویل تکراری باعث افزایش دوباره اعتبار نخواهد شد.</p>
+  {% else %}<p>استعلام از درگاه برای شناسهٔ قبلی در صف قرار می‌گیرد. نتیجه را از صفحه پیگیری پرداخت ببین. اگر ساخت پرداخت بدون شناسه درگاه نامعلوم مانده، ابتدا باید نتیجه از پشتیبانی همان درگاه پیگیری شود.</p>{% endif %}
+  {% if preview %}
+  <div class="preview"><h3>بررسی پیش از ثبت</h3><dl><dt>کاربر</dt><dd>{{ preview.name }} · <bdi>{{ preview.username }}</bdi></dd><dt>رکورد</dt><dd>{{ preview.details }}</dd>{% if preview.amount %}<dt>تعداد درخواست ویژه</dt><dd>{{ preview.amount }}</dd>{% endif %}<dt>دلیل ثبت‌شونده</dt><dd>{{ preview.reason }}</dd></dl></div>
+  <form method="post">{% csrf_token %}<input type="hidden" name="confirmation" value="{{ confirmation }}"><button class="primary" type="submit">تأیید و ثبت عملیات</button></form>
+  <details><summary>ویرایش اطلاعات</summary>
+  {% endif %}
+  <form method="post">{% csrf_token %}{{ form.non_field_errors }}{% for hidden in form.hidden_fields %}{{ hidden }}{{ hidden.errors }}{% endfor %}
+    {% for field in form.visible_fields %}<div class="field">{{ field.label_tag }}{{ field }}{{ field.errors }}{% if field.help_text %}<p class="hint">{{ field.help_text }}</p>{% endif %}</div>{% endfor %}
+    <button class="primary" type="submit">بررسی و پیش‌نمایش</button>
+  </form>{% if preview %}</details>{% endif %}
+</section>
+<section class="finance-panel"><h2>آخرین عملیات پشتیبانی</h2><p class="hint">نام ادمین، دلیل و نتیجهٔ هر اجرا در سابقه‌ای غیرقابل‌ویرایش ثبت می‌شود.</p><div class="finance-scroll"><table><thead><tr><th>رسید / عملیات</th><th>کاربر</th><th>دلیل</th><th>ادمین</th><th>زمان</th></tr></thead><tbody>
+{% for row in history %}<tr><td>#{{ row.pk }} · {{ row.action_label }}</td><td>{{ row.wallet.user.username }}</td><td>{{ row.reason }}</td><td>{{ row.actor.username }}</td><td>{{ row.created_at }}</td></tr>{% empty %}<tr><td class="empty" colspan="5">هنوز عملیاتی ثبت نشده است.</td></tr>{% endfor %}</tbody></table></div></section>
+{% endblock %}

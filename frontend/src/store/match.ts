@@ -20,7 +20,7 @@ type MatchStore = {
   loadLobby: () => Promise<void>;
   loadModes: () => Promise<void>;
   resume: () => Promise<void>;
-  enqueue: (mode: string, aiConsent?: boolean) => Promise<void>;
+  enqueue: (mode: string, aiConsent?: boolean, useCredit?: boolean) => Promise<void>;
   cancel: () => Promise<void>;
   clearMatch: () => void;
   dismissExpired: () => void;
@@ -61,6 +61,9 @@ export const useMatch = create<MatchStore>((set, get) => ({
 
     socket.onEvent((type, data) => {
       switch (type) {
+        case "billing.changed":
+          void get().loadModes().catch(() => undefined);
+          break;
         case "mm.queued":
         case "mm.searching":
           rememberSearch(Number(data.id));
@@ -77,6 +80,7 @@ export const useMatch = create<MatchStore>((set, get) => ({
           break;
 
         case "mm.expired":
+          void get().loadModes().catch(() => undefined);
           matchVersion += 1;
           rememberSearch(null);
           set({
@@ -86,6 +90,7 @@ export const useMatch = create<MatchStore>((set, get) => ({
           break;
 
         case "mm.cancelled":
+          void get().loadModes().catch(() => undefined);
           matchVersion += 1;
           rememberSearch(null);
           set({ ticket: null });
@@ -134,10 +139,10 @@ export const useMatch = create<MatchStore>((set, get) => ({
     }
   },
 
-  async enqueue(mode, aiConsent = false) {
+  async enqueue(mode, aiConsent = false, useCredit = false) {
     set({ error: null, expired: null });
     const startedVersion = ++matchVersion;
-    const ticket = await api.enqueue(mode, aiConsent);
+    const ticket = await api.enqueue(mode, aiConsent, useCredit);
     if (ticket.state === "MATCHED" && ticket.conversation_id) {
       rememberSearch(null);
       set({ ticket: null, matchedConversationId: ticket.conversation_id });
@@ -145,13 +150,15 @@ export const useMatch = create<MatchStore>((set, get) => ({
       rememberSearch(ticket.state === "QUEUED" ? ticket.id : null);
       set({ ticket: ticket.state === "QUEUED" ? ticket : null });
     }
+    void get().loadLobby().catch(() => undefined);
   },
 
   async cancel() {
     matchVersion += 1;
-    await api.cancelMatch();
+    const result = await api.cancelMatch(get().ticket?.id ?? rememberedSearch());
     rememberSearch(null);
-    set({ ticket: null });
+    set({ ticket: null, ...(result?.state === "MATCHED" && result.conversation_id ? { matchedConversationId: result.conversation_id } : {}) });
+    void get().loadLobby().catch(() => undefined);
   },
 
   clearMatch() {

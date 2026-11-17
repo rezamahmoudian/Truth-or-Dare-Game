@@ -7,6 +7,7 @@ from apps.chat import broadcast, presence
 from apps.chat import services as chat
 from apps.chat.models import Participant
 from apps.core.errors import DomainError
+from apps.core.locking import lock_players
 from apps.game import services as game
 from apps.matchmaking.models import MatchTicket, TicketState
 from apps.users.models import GameInvitation, User
@@ -35,6 +36,9 @@ def lists(user):
         from_user__is_active=True, to_user__is_active=True
     ).select_related("from_user", "to_user", "conversation").order_by("-created_at")
     result = {"incoming": [], "outgoing": [], "ready": []}
+    from apps.billing.vip import hydrate
+    rows = list(rows)
+    hydrate(person for row in rows for person in (row.from_user, row.to_user))
     ready_conversations = set()
     for row in rows:
         if row.status == "ACCEPTED":
@@ -59,7 +63,7 @@ def _eligible(user):
 def send(user, other_id):
     other = _resolve(user, other_id)
     # A stable pair lock also serializes simultaneous invitations in opposite directions.
-    list(User.objects.select_for_update().filter(pk__in=[user.pk, other.pk]).order_by("pk"))
+    lock_players([user.pk, other.pk])
     _eligible(user)
     _eligible(other)
     existing = GameInvitation.objects.filter(
@@ -98,13 +102,21 @@ def respond(user, invitation_id, action, *, conversation_id=None):
         _eligible(row.from_user)
         _eligible(row.to_user)
         ids = [row.from_user_id, row.to_user_id]
-        # Stop random matchmaking before creating the accepted invitation's room.
+        lock_players(ids)
+        room = chat.get_or_create_pair(row.from_user, row.to_user, room=True, preferred_id=conversation_id)
+        # Settle queued searches in the same transaction as accepting the room.
         tickets = list(MatchTicket.objects.select_for_update().filter(user_id__in=ids, state=TicketState.QUEUED).order_by("pk"))
+        from apps.billing.wallets import locked_wallet, release_credit
+        from apps.matchmaking.quota import close_pending
+        for user_id in sorted(ids):
+            locked_wallet(user_id)
+        close_pending(room.pk)
         for ticket in tickets:
             ticket.state = TicketState.CANCELLED
             ticket.save(update_fields=["state"])
+            if ticket.uses_credit:
+                release_credit(user=ticket.user, ticket_id=ticket.pk, reason="پذیرش دعوت بازی")
             transaction.on_commit(lambda uid=ticket.user_id: broadcast.to_users([uid], "mm.cancelled", {}))
-        room = chat.get_or_create_pair(row.from_user, row.to_user, room=True, preferred_id=conversation_id)
         chat.post_system_message(room, "دعوت بازی پذیرفته شد. بازی دونفره آماده است!")
         if not game.active_session(room.pk):
             # Both participants agreed; an existing ROOM may belong to the recipient.

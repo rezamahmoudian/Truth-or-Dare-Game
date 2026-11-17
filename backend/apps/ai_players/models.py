@@ -53,8 +53,7 @@ class Persona(models.Model):
 
     def public_profile(self):
         return {"first_name": self.first_name, "last_name": self.last_name,
-                "age": self.age, "city": self.city, "interests": self.interests,
-                "disclosure": "شخصیت داستانی هوش مصنوعی"}
+                "age": self.age, "city": self.city, "interests": self.interests}
 
 
 def session_deadline():

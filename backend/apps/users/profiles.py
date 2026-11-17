@@ -28,4 +28,8 @@ def profile_payload(user, *, relation):
     result["badges"] = [dict(key=key, title=title, description=description, icon=icon,
         earned=value >= target, progress=min(value, target), target=target)
         for key, title, description, icon, value, target in milestones]
+    from apps.billing.items import gift_summary
+    result["gifts"] = gift_summary(user)
+    if result["gifts"]:
+        result["badges"].append(dict(key="gifted", title="رفیق دوست‌داشتنی", description="دریافت هدیه از هم‌بازی‌ها", icon="🎁", earned=True, progress=1, target=1))
     return result

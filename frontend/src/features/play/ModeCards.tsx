@@ -5,7 +5,7 @@ import { ChevronIcon, SparkleIcon } from "@/ui/icons";
 const QUEUE_LABEL: Record<string, string> = { FAST: "هم‌بازی‌ها منتظرن", SLOW: "کمی صبر، یه رفیق تازه", EMPTY: "اولین نفر باش" };
 
 export function HeroCard({ mode, onPick }: { mode: MatchMode; onPick: (mode: MatchMode) => void }) {
-  return <button type="button" disabled={mode.remaining_today === 0} onClick={() => onPick(mode)} className="press quick-card disabled:opacity-50">
+  return <button type="button" onClick={() => onPick(mode)} className="press quick-card">
     <span className="quick-kicker">✦ بذار شانس انتخاب کنه</span>
     <h2>{mode.title}</h2>
     <p>یه هم‌بازی تازه؛<br />شاید یه رفاقت غیرمنتظره!</p>
@@ -23,14 +23,14 @@ export function ModeCard({ mode, onPick }: { mode: MatchMode; onPick: (mode: Mat
   const photo = mode.key === 'girls' ? 'girl' : mode.key === 'boys' ? 'boy' : mode.key === 'deep' ? 'challenge' : null;
   const tone = mode.key === 'girls' ? 'rose' : mode.key === 'boys' ? 'sky' : mode.key === 'deep' ? 'peach' : 'lavender';
   const soldOut = mode.remaining_today === 0;
-  return <button type="button" disabled={soldOut} onClick={() => onPick(mode)}
+  return <button type="button" onClick={() => onPick(mode)}
     className={`press mode-card mode-${tone} ${mode.key === 'group' ? 'mode-wide' : ''} ${photo ? 'mode-photo-card' : ''} disabled:opacity-50`}>
     {photo ? <span className="mode-photo-frame" aria-hidden="true"><img className="mode-photo" src={`/images/modes/${photo}.jpg`} alt="" loading="lazy" /></span> : mode.key === 'group' ? <span className="group-card-art" aria-hidden="true"><i>؟</i><i>✦</i><i>ϟ</i></span> : <span className="mode-symbol" aria-hidden="true"><SparkleIcon size={28} /></span>}
     <span className="mode-copy"><span className="mode-title">{mode.title}</span><span className="mode-subtitle">{mode.subtitle}</span>
-      <span className={mode.is_ai ? 'mode-status' : 'sr-only'}>{mode.is_ai ? 'شخصیت داستانی AI' : QUEUE_LABEL[mode.queue_state] ?? ''}</span>
+      {!mode.is_ai && <span className="sr-only">{QUEUE_LABEL[mode.queue_state] ?? ''}</span>}
     </span>
     <span className="mode-arrow" aria-hidden="true"><ChevronIcon size={15} /></span>
-    {mode.remaining_today !== null && <span className="mode-limit">{soldOut ? 'تمام شد' : `${faNum(mode.remaining_today)} بازی باقی‌مانده`}</span>}
+    {mode.remaining_today !== null && <span className="mode-limit">{soldOut ? mode.credit_required && (mode.credit_available ?? 0) > 0 ? '۱ اعتبار ویژه' : 'سهمیه تمام شد' : `${faNum(mode.remaining_today)} بازی رایگان`}</span>}
   </button>;
 }
 

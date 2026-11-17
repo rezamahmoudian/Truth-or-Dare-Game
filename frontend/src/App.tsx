@@ -19,6 +19,10 @@ import { useSocial } from "@/store/social";
 import { useSession } from "@/store/session";
 import { Button } from "@/ui/Button";
 import { ErrorBoundary } from "@/ui/ErrorBoundary";
+import { ShopScreen } from "@/features/shop/ShopScreen";
+import { CollectionScreen } from "@/features/shop/CollectionScreen";
+import { PaymentScreen } from "@/features/shop/PaymentScreen";
+import { VipSync } from "@/ui/Vip";
 
 export default function App() {
   const status = useSession((s) => s.status);
@@ -71,6 +75,7 @@ export default function App() {
 
   return (
     <BrowserRouter>
+      <VipSync />
       <OfflineBar />
       <UpdateToast />
       <RoutedScreens />
@@ -96,6 +101,9 @@ function RoutedScreens() {
         <Route path="/friends" element={<FriendsScreen />} />
         <Route path="/people/:userId" element={<PublicProfileScreen />} />
         <Route path="/profile" element={<ProfileScreen />} />
+        <Route path="/shop" element={<ShopScreen />} />
+        <Route path="/shop/items" element={<CollectionScreen />} />
+        <Route path="/shop/payment/:orderId" element={<PaymentScreen />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </ErrorBoundary>

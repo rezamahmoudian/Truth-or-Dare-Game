@@ -1,4 +1,4 @@
-from rest_framework import status
+from rest_framework import serializers, status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -34,12 +34,26 @@ class ReportView(APIView):
         if not target:
             raise DomainError("target_required", "کاربر مورد نظر مشخص نیست.")
 
+        # URL clients can send arbitrary JSON here.  Validate IDs before they
+        # reach a queryset so malformed values produce a normal 400 instead of
+        # a database ValueError/500.
+        try:
+            target = serializers.IntegerField(min_value=1).run_validation(target)
+            raw_message = request.data.get("message_id")
+            message_id = (
+                None
+                if raw_message in (None, "")
+                else serializers.IntegerField(min_value=1).run_validation(raw_message)
+            )
+        except serializers.ValidationError as exc:
+            raise DomainError("invalid_report_target", "شناسهٔ گزارش نامعتبر است.") from exc
+
         services.report(
             request.user,
-            int(target),
+            target,
             str(request.data.get("reason") or ""),
             note=str(request.data.get("note") or ""),
-            message_id=request.data.get("message_id"),
+            message_id=message_id,
         )
         return Response(
             {"detail": "گزارش شما ثبت شد و بررسی می‌شود."},
