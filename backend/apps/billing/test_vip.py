@@ -43,6 +43,7 @@ class VIPFixtures(Fixtures):
 
 
 @override_settings(BILLING_ORDERS_ENABLED=True)
+@override_settings(MONETIZATION_ENABLED=True)
 class VIPTests(VIPFixtures, TestCase):
     def test_status_rejects_future_expired_revoked_and_ai(self):
         first = self.buy_vip()

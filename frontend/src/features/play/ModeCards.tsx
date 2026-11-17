@@ -1,3 +1,4 @@
+import { useMonetization } from "@/lib/features";
 import type { MatchMode } from "@/lib/types";
 import { faNum } from "@/lib/dates";
 import { ChevronIcon, SparkleIcon } from "@/ui/icons";
@@ -23,6 +24,7 @@ export function ModeCard({ mode, onPick }: { mode: MatchMode; onPick: (mode: Mat
   const photo = mode.key === 'girls' ? 'girl' : mode.key === 'boys' ? 'boy' : mode.key === 'deep' ? 'challenge' : null;
   const tone = mode.key === 'girls' ? 'rose' : mode.key === 'boys' ? 'sky' : mode.key === 'deep' ? 'peach' : 'lavender';
   const soldOut = mode.remaining_today === 0;
+  const monetization = useMonetization();
   return <button type="button" onClick={() => onPick(mode)}
     className={`press mode-card mode-${tone} ${mode.key === 'group' ? 'mode-wide' : ''} ${photo ? 'mode-photo-card' : ''} disabled:opacity-50`}>
     {photo ? <span className="mode-photo-frame" aria-hidden="true"><img className="mode-photo" src={`/images/modes/${photo}.jpg`} alt="" loading="lazy" /></span> : mode.key === 'group' ? <span className="group-card-art" aria-hidden="true"><i>؟</i><i>✦</i><i>ϟ</i></span> : <span className="mode-symbol" aria-hidden="true"><SparkleIcon size={28} /></span>}
@@ -30,7 +32,7 @@ export function ModeCard({ mode, onPick }: { mode: MatchMode; onPick: (mode: Mat
       {!mode.is_ai && <span className="sr-only">{QUEUE_LABEL[mode.queue_state] ?? ''}</span>}
     </span>
     <span className="mode-arrow" aria-hidden="true"><ChevronIcon size={15} /></span>
-    {mode.remaining_today !== null && <span className="mode-limit">{soldOut ? mode.credit_required && (mode.credit_available ?? 0) > 0 ? '۱ اعتبار ویژه' : 'سهمیه تمام شد' : `${faNum(mode.remaining_today)} بازی رایگان`}</span>}
+    {mode.remaining_today !== null && <span className="mode-limit">{soldOut ? monetization && mode.credit_required && (mode.credit_available ?? 0) > 0 ? '۱ اعتبار ویژه' : 'سهمیه تمام شد' : `${faNum(mode.remaining_today)} بازی رایگان`}</span>}
   </button>;
 }
 

@@ -4,6 +4,7 @@ import { ApiError } from "@/lib/auth";
 import * as gameApi from "@/lib/gameApi";
 import type { PromptSuggestion } from "@/lib/types";
 import { Button } from "@/ui/Button";
+import { ChevronIcon, SparkleIcon } from "@/ui/icons";
 
 const CATEGORIES = [
   ["FRIENDLY", "معمولی"],
@@ -70,21 +71,22 @@ export function PromptSuggestionCard() {
     "surface-raised min-h-11 w-full rounded-field px-3 text-[13px] outline-none placeholder:text-faint focus:border-brand/60";
 
   return (
-    <section className="surface-card rounded-card p-4">
+    <section className="surface-card profile-option rounded-card p-4">
       <button
         type="button"
         onClick={() => setOpen((value) => !value)}
-        className="flex w-full items-center justify-between text-start"
+        className="profile-option-toggle"
+        aria-expanded={open}
+        aria-controls="my-prompt-suggestions"
       >
-        <span className="text-[15px] font-bold">💡 پیشنهاد سؤال</span>
-        <span className="text-faint">{open ? "−" : "+"}</span>
+        <span className="profile-option-icon" aria-hidden="true"><SparkleIcon size={21} /></span>
+        <span className="profile-option-label"><strong>پیشنهاد سؤال</strong><small>سؤال بعدی بازی از تو باشه</small></span>
+        <ChevronIcon size={17} className={open ? "profile-chevron-open" : ""} />
       </button>
-      <p className="mt-1 text-[12.5px] leading-relaxed text-muted">
-        سؤال جالبی داری؟ بفرست تا بعد از بررسی به بازی اضافه‌اش کنیم.
-      </p>
 
       {open && (
-        <div className="mt-3 flex flex-col gap-3">
+        <div id="my-prompt-suggestions" className="mt-3 flex flex-col gap-3">
+          <p className="text-xs leading-6 text-muted">سؤالت بعد از تأیید به بازی اضافه می‌شه.</p>
           <textarea
             value={text}
             onChange={(event) => setText(event.target.value)}

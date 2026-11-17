@@ -853,3 +853,5 @@ input, textarea, select { accent-color: var(--color-brand); }
   box-shadow: 0 0 0 200px #0006;
   pointer-events: none;
 }
+
+.lobby-greeting h1.lobby-motto { font-size: clamp(14px, 3.8vw, 17px); line-height: 1.9; }

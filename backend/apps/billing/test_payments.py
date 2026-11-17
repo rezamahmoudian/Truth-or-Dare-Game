@@ -43,7 +43,7 @@ class FakeGateway(Gateway):
         return VerificationResult(type(self).outcome, reference, "tx-" + reference, original.amount, original.currency)
 
 
-PAYMENT_SETTINGS = dict(DEBUG=True, BILLING_ORDERS_ENABLED=True, BILLING_PAYMENTS_ENABLED=True,
+PAYMENT_SETTINGS = dict(DEBUG=True, MONETIZATION_ENABLED=True, BILLING_ORDERS_ENABLED=True, BILLING_PAYMENTS_ENABLED=True,
     BILLING_GATEWAY="test", BILLING_GATEWAY_ADAPTERS={"test": "apps.billing.test_payments.FakeGateway"},
     BILLING_PUBLIC_BASE_URL="https://game.example.test")
 

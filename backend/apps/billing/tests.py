@@ -355,6 +355,7 @@ class BillingTests(Fixtures, TestCase):
 
 
 @override_settings(BILLING_ORDERS_ENABLED=True)
+@override_settings(MONETIZATION_ENABLED=True)
 class BillingAPITests(Fixtures, TestCase):
     def setUp(self):
         super().setUp()

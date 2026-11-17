@@ -1,3 +1,4 @@
+import { useMonetization } from "@/lib/features";
 import { useEffect } from "react";
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
 
@@ -91,6 +92,7 @@ export default function App() {
  */
 function RoutedScreens() {
   const location = useLocation();
+  const monetization = useMonetization();
   return (
     <ErrorBoundary resetKey={location.pathname}>
       <Routes>
@@ -101,8 +103,8 @@ function RoutedScreens() {
         <Route path="/friends" element={<FriendsScreen />} />
         <Route path="/people/:userId" element={<PublicProfileScreen />} />
         <Route path="/profile" element={<ProfileScreen />} />
-        <Route path="/shop" element={<ShopScreen />} />
-        <Route path="/shop/items" element={<CollectionScreen />} />
+        <Route path="/shop" element={monetization ? <ShopScreen /> : <Navigate to="/profile" replace />} />
+        <Route path="/shop/items" element={monetization ? <CollectionScreen /> : <Navigate to="/profile" replace />} />
         <Route path="/shop/payment/:orderId" element={<PaymentScreen />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

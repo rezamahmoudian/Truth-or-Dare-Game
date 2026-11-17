@@ -69,6 +69,11 @@ class PublicUserSerializer(serializers.ModelSerializer):
 
 
 class MeSerializer(serializers.ModelSerializer):
+    monetization_enabled = serializers.SerializerMethodField()
+
+    def get_monetization_enabled(self, obj):
+        return settings.MONETIZATION_ENABLED
+
     vip = serializers.ReadOnlyField()
     interests = serializers.ListField(child=serializers.CharField(max_length=24, allow_blank=False), max_length=10, required=False)
 
@@ -83,6 +88,7 @@ class MeSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
         fields = (
+            "monetization_enabled",
             "vip",
             "id",
             "username",

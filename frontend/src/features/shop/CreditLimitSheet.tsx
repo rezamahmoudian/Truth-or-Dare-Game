@@ -1,8 +1,14 @@
+import { useMonetization } from "@/lib/features";
 import { Link } from "react-router-dom";
 import { ShopSheet } from "./ShopSheet";
 import { ShopIcon } from "./ShopIcon";
 
 export function CreditLimitSheet({ modeTitle, onClose, preview = false }: { modeTitle: string; onClose: () => void; preview?: boolean }) {
+  const enabled = useMonetization();
+  if (!enabled) return <ShopSheet title="سهمیهٔ امروز تمام شد" onClose={onClose}>
+    <p className="shop-sheet-copy">سهمیهٔ امروز {modeTitle} تمام شده؛ فردا دوباره امتحان کن یا یک حالت دیگر را انتخاب کن.</p>
+    <button type="button" className="shop-primary" onClick={onClose}>برگشت به بازی</button>
+  </ShopSheet>;
   return <ShopSheet title="یه فرصت دیگه برای آشنایی" onClose={onClose}>
     <div className="shop-limit-art"><ShopIcon size={40} /><span>+۱</span></div>
     <h3 className="shop-sheet-heading">سهمیهٔ {modeTitle} تموم شده</h3>

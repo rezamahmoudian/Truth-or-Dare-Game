@@ -8,6 +8,7 @@ from django.http import HttpResponseRedirect
 from rest_framework import serializers
 from rest_framework.permissions import AllowAny
 
+from .permissions import MonetizationEnabled
 from . import services
 from .models import Entitlement, Order, WalletLedger
 from .serializers import CreateOrderSerializer, EntitlementSerializer, LedgerSerializer, OrderSerializer
@@ -24,7 +25,7 @@ class BillingPagination(PageNumberPagination):
 
 
 class CatalogView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, MonetizationEnabled]
 
     def get(self, request):
         offers = services.available_offers().filter(channel="web")
@@ -50,7 +51,7 @@ class CatalogView(APIView):
 
 
 class VIPView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, MonetizationEnabled]
 
     def get(self, request):
         from .vip import membership
@@ -58,7 +59,7 @@ class VIPView(APIView):
 
 
 class SpotlightView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, MonetizationEnabled]
     throttle_scope = "profile"
 
     def post(self, request):
@@ -70,7 +71,7 @@ class SpotlightView(APIView):
 
 
 class WalletView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, MonetizationEnabled]
 
     def get(self, request):
         return Response(wallet_snapshot(request.user))
@@ -78,6 +79,12 @@ class WalletView(APIView):
 
 class OrdersView(generics.ListAPIView):
     permission_classes = [IsAuthenticated]
+
+    def get_permissions(self):
+        permissions = super().get_permissions()
+        if self.request.method == "POST":
+            permissions.append(MonetizationEnabled())
+        return permissions
     serializer_class = OrderSerializer
     pagination_class = BillingPagination
 
@@ -109,7 +116,7 @@ class OrderDetailView(generics.RetrieveAPIView):
 
 
 class StartPaymentView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, MonetizationEnabled]
     throttle_scope = "billing_payment"
 
     def post(self, request, pk):

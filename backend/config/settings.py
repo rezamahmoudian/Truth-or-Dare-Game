@@ -25,6 +25,7 @@ environ.Env.read_env(REPO_ROOT / ".env")
 SECRET_KEY = env("DJANGO_SECRET_KEY", default="dev-insecure-secret-key-change-me")
 DEBUG = env("DEBUG")
 ALLOWED_HOSTS = env("ALLOWED_HOSTS")
+MONETIZATION_ENABLED = env.bool("MONETIZATION_ENABLED", default=False)
 
 # --------------------------------------------------------------------------
 # Applications

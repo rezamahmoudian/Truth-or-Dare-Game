@@ -2,6 +2,7 @@ from rest_framework import serializers
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from .permissions import MonetizationEnabled
 from . import items
 
 
@@ -13,14 +14,14 @@ class ItemAction(serializers.Serializer):
 
 
 class InventoryView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, MonetizationEnabled]
 
     def get(self, request):
         return Response(items.inventory(request.user))
 
 
 class EquipView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, MonetizationEnabled]
     throttle_scope = "profile"
 
     def post(self, request):
@@ -33,7 +34,7 @@ class EquipView(APIView):
 
 
 class UseItemView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, MonetizationEnabled]
     throttle_scope = "profile"
 
     def post(self, request):
@@ -46,7 +47,7 @@ class UseItemView(APIView):
 
 
 class GiftLeadersView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, MonetizationEnabled]
 
     def get(self, request):
         return Response({"results": items.leaders(request.user), "period": "calendar_month_utc"})

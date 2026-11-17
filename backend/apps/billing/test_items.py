@@ -48,6 +48,7 @@ class ItemFixtures(Fixtures):
 
 
 @override_settings(BILLING_ORDERS_ENABLED=True)
+@override_settings(MONETIZATION_ENABLED=True)
 class ItemTests(ItemFixtures, TestCase):
     def test_last_gift_retry_after_inventory_refresh_returns_original_message(self):
         grant = self.buy()
@@ -313,6 +314,7 @@ class ItemConcurrencyTests(ItemFixtures, TransactionTestCase):
 
 
 @override_settings(BILLING_ORDERS_ENABLED=True, REWARDED_ADS_ENABLED=True, REWARDED_AD_PROVIDER="test", REWARDED_AD_DAILY_LIMIT=1)
+@override_settings(MONETIZATION_ENABLED=True)
 class RewardTests(ItemFixtures, TestCase):
     def test_callback_must_pass_adapter_verification(self):
         class RejectingProvider:

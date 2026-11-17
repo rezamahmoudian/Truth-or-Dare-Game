@@ -1,0 +1,50 @@
+.my-profile-content { width: 100%; max-width: 448px; margin: 0 auto; padding: 20px 16px 32px; display: flex; flex-direction: column; gap: 18px; }
+.profile-header-mark { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 12px; color: var(--color-hot); background: var(--color-surface-2); }
+.my-profile-hero { overflow: hidden; border-radius: 28px; border: 1px solid var(--color-line); background: var(--color-surface); box-shadow: 0 14px 40px #00000018; }
+.my-profile-cover { position: relative; height: 94px; overflow: hidden; background: linear-gradient(115deg, #482b70, #7040aa 60%, #3f295d); }
+.my-profile-cover::before, .my-profile-cover::after { content: ''; position: absolute; width: 200px; height: 200px; border: 1px solid #ffffff16; border-radius: 50%; inset-block-start: -143px; inset-inline-start: -12px; }
+.my-profile-cover::after { width: 250px; height: 250px; inset-block-start: -165px; inset-inline-start: -36px; }
+.my-profile-cover span { position: absolute; inset-inline-start: 30px; top: 30px; font-size: 26px; color: var(--color-hot); transform: rotate(-12deg); }
+.my-profile-cover b { position: absolute; inset-inline-end: 32px; top: 15px; font-size: 48px; color: #ffffff25; transform: rotate(15deg); }
+.my-profile-cover i { position: absolute; inset-inline-end: 86px; top: 51px; width: 7px; height: 7px; border-radius: 50%; background: #ffffff60; }
+.my-profile-identity { position: relative; display: flex; flex-direction: column; align-items: center; padding: 0 22px 22px; text-align: center; }
+.profile-avatar-edit { position: relative; margin-top: -43px; border: 6px solid var(--color-surface); border-radius: 50%; background: var(--color-surface); }
+.profile-avatar-edit > span:last-child { position: absolute; bottom: -1px; inset-inline-end: -4px; display: grid; place-items: center; width: 29px; height: 29px; border-radius: 50%; border: 3px solid var(--color-surface); background: var(--color-hot); color: var(--color-ink); font-size: 19px; }
+.my-profile-identity h2 { font-size: 23px; font-weight: 850; margin: 9px 0 0; max-width: 100%; overflow-wrap: anywhere; }
+.my-profile-handle { color: var(--color-muted); font-size: 12px; margin-top: 1px; overflow-wrap: anywhere; }
+.my-profile-meta { font-size: 12px; color: var(--color-muted); margin-top: 9px; overflow-wrap: anywhere; }
+.my-profile-bio { margin-top: 12px; font-size: 13px; line-height: 1.9; white-space: pre-wrap; overflow-wrap: anywhere; }
+.my-profile-interests { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; margin-top: 12px; }
+.my-profile-interests span { padding: 3px 10px; border-radius: 20px; background: var(--color-surface-2); color: #d8c6f5; font-size: 11px; overflow-wrap: anywhere; max-width: 100%; }
+.my-profile-actions { display: flex; width: 100%; gap: 10px; margin-top: 20px; }
+.my-profile-actions > * { display: flex; flex: 1; min-width: 0; min-height: 46px; align-items: center; justify-content: center; gap: 6px; padding: 8px; border-radius: 14px; font-size: 12px; font-weight: 700; }
+.my-profile-actions button { color: white; background: var(--color-brand); }
+.my-profile-actions a { border: 1px solid var(--color-line); color: var(--color-text); background: var(--color-surface-2); }
+.my-profile-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); padding: 17px 12px; border-top: 1px solid var(--color-line); background: #15131f36; }
+.my-profile-stats > div { display: flex; flex-direction: column-reverse; align-items: center; gap: 2px; }
+.my-profile-stats > div + div { border-inline-start: 1px solid var(--color-line); }
+.my-profile-stats dt { font-size: 11px; color: var(--color-muted); }
+.my-profile-stats dd { font-weight: 850; font-size: 23px; line-height: 1.5; }
+.my-profile-stats > div:first-child dd { color: var(--color-hot); }
+.my-profile-streak { display: flex; align-items: center; gap: 9px; border: 1px solid #deff8628; border-radius: 16px; background: #deff8609; padding: 12px 15px; color: var(--color-hot); }
+.my-profile-streak strong { font-size: 12px; }
+.my-profile-streak span { margin-inline-start: auto; color: var(--color-muted); font-size: 11px; }
+.my-profile-options { display: flex; flex-direction: column; gap: 10px; }
+.my-profile-options > h2 { font-size: 12px; color: var(--color-muted); margin: 1px 5px 3px; }
+.profile-option-toggle { display: flex; align-items: center; text-align: start; width: 100%; gap: 12px; min-height: 48px; }
+.profile-option-label { flex: 1; min-width: 0; }
+.profile-option-label strong { display: block; font-size: 13px; font-weight: 750; }
+.profile-option-label small { display: block; margin-top: 2px; font-size: 11px; color: var(--color-muted); }
+.profile-option-icon { display: grid; place-items: center; flex-shrink: 0; width: 42px; height: 42px; border-radius: 14px; background: #7944d425; color: #ccb0f7; font-size: 24px; }
+.profile-option-icon-muted { background: var(--color-surface-2); color: var(--color-muted); }
+.profile-option-toggle > svg { color: var(--color-muted); flex-shrink: 0; transition: transform .18s ease; }
+.profile-chevron-open { transform: rotate(-90deg); }
+.my-profile-options .profile-option { padding: 12px 14px; border-radius: 20px; box-shadow: none; }
+.my-profile-editor, .my-profile-commerce { display: flex; flex-direction: column; gap: 12px; }
+.my-profile-editor[hidden] { display: none; }
+.my-profile-editor { border: 1px solid var(--color-line); border-radius: 24px; padding: 6px; background: var(--color-surface); }
+.my-profile-editor > section, .my-profile-editor > form { background: transparent; border: none; box-shadow: none; }
+.my-profile-editor > form { border-top: 1px solid var(--color-line); border-radius: 0; }
+.my-profile-screen button:focus-visible, .my-profile-screen a:focus-visible { outline: 2px solid var(--color-hot); outline-offset: 4px; }
+@media (max-width: 360px) { .my-profile-identity { padding-inline: 14px; } .my-profile-actions { gap: 7px; } .my-profile-actions > * { font-size: 11px; } }
+@media (prefers-reduced-motion: reduce) { .profile-option-toggle > svg { transition: none; } }

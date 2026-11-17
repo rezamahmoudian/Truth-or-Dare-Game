@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
+import { useMonetization } from "@/lib/features";
 import { ApiError } from "@/lib/auth";
 import { checkPayment, getOrder, paymentKey, startPayment, type BillingOrder, type Payment } from "@/lib/billingApi";
 import { faNum } from "@/lib/dates";
@@ -20,6 +21,7 @@ const LABEL: Record<Payment["state"], [string, string]> = {
 };
 
 export function PaymentScreen() {
+  const monetization = useMonetization();
   const { orderId = "" } = useParams();
   const [order, setOrder] = useState<BillingOrder | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -43,13 +45,13 @@ export function PaymentScreen() {
     return () => window.clearInterval(timer);
   }, [order, refresh]);
   const state = order?.payment.state;
-  return <Screen className="shop-screen" header={<header className="shop-header"><Link className="shop-icon-button" to="/shop" aria-label="برگشت به فروشگاه"><ShopIcon kind="arrow" /></Link><h1>پیگیری خرید</h1></header>}>
+  return <Screen className="shop-screen" header={<header className="shop-header"><Link className="shop-icon-button" to={monetization ? "/shop" : "/profile"} aria-label="برگشت"><ShopIcon kind="arrow" /></Link><h1>پیگیری خرید</h1></header>}>
     <div className="shop-content">
-      {state && <><div className={`shop-result-mark ${state === "FULFILLED" ? "lime" : "violet"}`}><ShopIcon kind={state === "FULFILLED" ? "check" : "clock"} size={36} /></div><div role="status"><h2 className="shop-sheet-heading">{LABEL[state][0]}</h2><p className="shop-sheet-copy">{LABEL[state][1]}</p></div></>}
+      {state && <><div className={`shop-result-mark ${state === "FULFILLED" ? "lime" : "violet"}`}><ShopIcon kind={state === "FULFILLED" ? "check" : "clock"} size={36} /></div><div role="status"><h2 className="shop-sheet-heading">{LABEL[state][0]}</h2><p className="shop-sheet-copy">{!monetization && ["NOT_STARTED", "FAILED", "EXPIRED"].includes(state) ? "خرید فعلاً غیرفعال است؛ اطلاعات سفارش برای پیگیری در دسترس است." : LABEL[state][1]}</p></div></>}
       {!order && !error && <p className="shop-sheet-copy">در حال دریافت سفارش…</p>}
       {order && <dl className="shop-receipt"><div><dt>محصول</dt><dd>{order.product_snapshot.title}</dd></div>{order.product_snapshot.kind !== "ITEM" && <div><dt>تعداد اعتبار</dt><dd>{faNum(order.product_snapshot.credits)}</dd></div>}<div><dt>مبلغ نهایی</dt><dd>{formatToman(order.amount / 10)}</dd></div><div><dt>شناسهٔ سفارش</dt><dd className="break-all text-xs"><bdi>{order.id}</bdi></dd></div></dl>}
       {error && <p className="mb-4 text-sm text-bad" role="alert">{error}</p>}
-      {order?.payment.can_start && <button type="button" className="shop-primary" disabled={busy} onClick={async () => {
+      {monetization && order?.payment.can_start && <button type="button" className="shop-primary" disabled={busy} onClick={async () => {
         setBusy(true); setError(null);
         try {
           const storageKey = `ft.payment.${order.id}.${state === "FAILED" ? order.payment.attempt_id : "initial"}`;
@@ -72,8 +74,8 @@ export function PaymentScreen() {
         catch { setError("بررسی انجام نشد؛ کمی بعد دوباره امتحان کن."); }
         finally { setBusy(false); }
       }}>بررسی دوبارهٔ وضعیت</button>}
-      <Link className="shop-text-button" to="/shop?tab=wallet">کیف اعتبار و سفارش‌ها</Link>
-      {order?.product_snapshot.kind === "ITEM" && <Link className="shop-primary" to="/shop/items">رفتن به مجموعهٔ من</Link>}
+      {monetization && <Link className="shop-text-button" to="/shop?tab=wallet">کیف اعتبار و سفارش‌ها</Link>}
+      {monetization && order?.product_snapshot.kind === "ITEM" && <Link className="shop-primary" to="/shop/items">رفتن به مجموعهٔ من</Link>}
     </div>
   </Screen>;
 }

@@ -21,6 +21,7 @@ import { Screen, Skeleton } from "@/ui/Screen";
 import { TabBar } from "@/ui/TabBar";
 import { ShopEntry } from "@/features/shop/ShopEntry";
 import { CreditLimitSheet } from "@/features/shop/CreditLimitSheet";
+import { useMonetization } from "@/lib/features";
 import { CreditMatchSheet } from "@/features/shop/CreditMatchSheet";
 
 /**
@@ -34,6 +35,7 @@ import { CreditMatchSheet } from "@/features/shop/CreditMatchSheet";
  */
 export function PlayScreen() {
   const navigate = useNavigate();
+  const monetization = useMonetization();
 
   const me = useSession((s) => s.user);
   const modes = useMatch((s) => s.modes);
@@ -75,14 +77,19 @@ export function PlayScreen() {
 
   async function pick(mode: MatchMode) {
     setError(null);
-    if (mode.credit_required && (mode.credit_available ?? 0) > 0) { setCreditMode(mode); return; }
+    if (mode.credit_required) {
+      if (monetization && (mode.credit_available ?? 0) > 0) setCreditMode(mode);
+      else setLimitedMode(mode);
+      return;
+    }
     if (mode.remaining_today === 0) { setLimitedMode(mode); return; }
     if (mode.is_ai) { setAIMode(mode); return; }
     try {
       await enqueue(mode.key);
     } catch (err) {
       if (err instanceof ApiError && err.body && typeof err.body === "object" && "code" in err.body && err.body.code === "credit_confirmation_required") {
-        setCreditMode(mode);
+        if (monetization) setCreditMode(mode);
+        else setLimitedMode(mode);
         return;
       }
       if (err instanceof ApiError && err.body && typeof err.body === "object" && "code" in err.body && ["daily_limit", "insufficient_credit"].includes(String(err.body.code))) {
@@ -104,7 +111,7 @@ export function PlayScreen() {
   return (
     <Screen header={<LobbyHeader streak={me?.streak_days ?? 0} />} footer={<TabBar />}>
       {limitedMode && <CreditLimitSheet modeTitle={limitedMode.title} onClose={() => setLimitedMode(null)} />}
-      {creditMode && <CreditMatchSheet modeTitle={creditMode.title} onClose={() => setCreditMode(null)} onStart={async () => {
+      {monetization && creditMode && <CreditMatchSheet modeTitle={creditMode.title} onClose={() => setCreditMode(null)} onStart={async () => {
         await enqueue(creditMode.key, false, true);
         setCreditMode(null);
       }} />}
@@ -115,7 +122,7 @@ export function PlayScreen() {
 
       <div className="mx-auto flex max-w-md flex-col gap-5 px-4 pb-8 pt-1">
         <div className="lobby-greeting">
-          <div><h1>امروز چقدر <em>پایه‌ای؟</em></h1><p className="mt-1 text-xs leading-6 text-muted">یه کم جرئت، یه کم حقیقت، کلی خاطره.</p></div>
+          <div><h1 className="lobby-motto">یکم جرئت، یکم حقیقت، <em>کلی خاطره</em></h1></div>
           {onlineCount > 0 && <span className="online-pill"><span className="size-1.5 rounded-full bg-ok" />{faNum(onlineCount)} آنلاین</span>}
         </div>
 
@@ -146,7 +153,7 @@ export function PlayScreen() {
 
         {rest.length > 0 && (
           <section>
-            <div className="mb-3 flex items-center justify-between gap-2"><h2 className="text-[15px] font-extrabold">یا خودت انتخاب کن</h2><span className="text-[11px] text-muted">چه حال‌وهوایی داری؟</span></div>
+            <h2 className="mb-3 text-[15px] font-extrabold">یا خودت انتخاب کن</h2>
             <div className="grid grid-cols-2 gap-3">
               {rest.map((mode) => (
                 <ModeCard key={mode.key} mode={mode} onPick={pick} />
@@ -221,6 +228,7 @@ function LobbyHeader({ streak }: { streak: number }) {
 }
 
 function ActiveNow({ people, onProfile }: { people: Person[]; onProfile: (p: Person) => void }) {
+  const monetization = useMonetization();
   return (
     <section>
       <h2 className="mb-1 text-[17px] font-extrabold">بازیکن‌های آنلاین</h2>
@@ -240,7 +248,7 @@ function ActiveNow({ people, onProfile }: { people: Person[]; onProfile: (p: Per
               <span className="absolute bottom-0.5 end-0.5 size-3 rounded-full border-2 border-ink bg-ok" />
             </span>
             <span className="w-full truncate text-center text-[11px] text-muted">
-              <VipName vip={person.vip}>{person.display_name}</VipName>{person.spotlight && <small className="block text-[9px] text-[#f5d489]">✦ Spotlight</small>}
+              <VipName vip={person.vip}>{person.display_name}</VipName>{monetization && person.spotlight && <small className="block text-[9px] text-[#f5d489]">✦ Spotlight</small>}
             </span>
             </button>
           </li>

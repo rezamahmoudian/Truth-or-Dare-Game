@@ -1,3 +1,4 @@
+import { useMonetization } from "@/lib/features";
 import { VipName } from "@/ui/Vip";
 import { ItemVisual } from "@/features/shop/ItemVisual";
 import { useEffect, useState } from "react";
@@ -22,6 +23,7 @@ export function PublicProfileScreen() {
 }
 
 function ProfileDetails({ userId }: { userId: number }) {
+  const monetization = useMonetization();
   const navigate = useNavigate();
   const selfId = useSession(s => s.user?.id);
   const relation = useSocial(s => s.relations[userId]);
@@ -97,7 +99,7 @@ function ProfileDetails({ userId }: { userId: number }) {
             <span className="profile-badge-icon" aria-hidden>{badge.icon}</span><div><h4>{badge.title} {badge.earned && <span aria-label="به دست آمده">✓</span>}</h4><p>{badge.description}</p>{!badge.earned && <><progress value={badge.progress} max={badge.target} aria-label={`پیشرفت ${badge.title}`} /><small>{faNum(badge.progress)} از {faNum(badge.target)}</small></>}</div>
           </article>)}</div>
         </section>
-        {!!person.gifts?.length && <section className="public-profile-section"><h3>هدیه‌های رفاقت</h3><div className="flex flex-wrap gap-4">{person.gifts.map(gift => <div className="text-center" key={gift.visual}><ItemVisual item={{ kind: "GIFT", visual: gift.visual }} /><p className="mt-2 text-xs">{gift.title} · {faNum(gift.count)}</p></div>)}</div></section>}
+        {monetization && !!person.gifts?.length && <section className="public-profile-section"><h3>هدیه‌های رفاقت</h3><div className="flex flex-wrap gap-4">{person.gifts.map(gift => <div className="text-center" key={gift.visual}><ItemVisual item={{ kind: "GIFT", visual: gift.visual }} /><p className="mt-2 text-xs">{gift.title} · {faNum(gift.count)}</p></div>)}</div></section>}
         {!own && <div className="profile-moderation"><span>تنظیمات ارتباط با این بازیکن</span><PersonMenu userId={userId} displayName={person.display_name} onBlocked={() => setAttempt(v => v + 1)} /></div>}
       </> : null}
       {error && <div role="alert" className="profile-error"><p>{error}</p>{!person && <button type="button" onClick={() => setAttempt(v => v + 1)}>تلاش دوباره</button>}</div>}

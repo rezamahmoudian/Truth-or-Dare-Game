@@ -1,3 +1,4 @@
+import { useMonetization } from "@/lib/features";
 import { VipName } from "@/ui/Vip";
 import { usePublicLook } from "@/store/vip";
 import { ChatItemsSheet } from "./ChatItemsSheet";
@@ -66,6 +67,7 @@ export function ChatRoomScreen() {
   const [conversation, setConversation] = useState<Conversation | null>(null);
   const [showPlayers, setShowPlayers] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
+  const monetization = useMonetization();
   const [showItems, setShowItems] = useState(false);
   const [conversationError, setConversationError] = useState("");
   const conversationRequest = useRef(0);
@@ -179,7 +181,7 @@ export function ChatRoomScreen() {
           {!isSystem && <ChatGameLauncher key={id} conversation={conversation} selfId={me?.id ?? 0} />}
           {!isSystem && <button type="button" className="chat-header-more grid size-11 shrink-0 place-items-center rounded-full" aria-label="گزینه‌های گفتگو" aria-expanded={showMenu} onClick={() => setShowMenu(v => !v)}><ChatIcon name="more" /></button>}
           {showMenu && !isSystem && <div className="chat-room-menu flex w-full flex-wrap items-center gap-2 p-2">
-          {!isClosed && <button type="button" className="min-h-11 rounded-field px-3 text-sm" onClick={() => { setShowItems(true); setShowMenu(false); }}>🎁 هدیه و استیکر</button>}
+          {monetization && !isClosed && <button type="button" className="min-h-11 rounded-field px-3 text-sm" onClick={() => { setShowItems(true); setShowMenu(false); }}>🎁 هدیه و استیکر</button>}
           <button type="button" className="min-h-11 rounded-field px-3 text-sm" onClick={() => { setShowPlayers(true); setShowMenu(false); }}>دیدن پروفایل بازیکن‌ها</button>
           {conversation?.code && !isClosed && <CopyCode code={conversation.code} />}
           {isOwner && !isClosed && (
@@ -216,7 +218,7 @@ export function ChatRoomScreen() {
         )
       }
     >
-      {showItems && conversation && <ChatItemsSheet key={id} conversation={conversation} onClose={() => setShowItems(false)} />}
+      {monetization && showItems && conversation && <ChatItemsSheet key={id} conversation={conversation} onClose={() => setShowItems(false)} />}
       {conversationError && !conversation ? (
         <div className="flex h-full items-center justify-center px-6 text-center">
           <div className="max-w-sm">

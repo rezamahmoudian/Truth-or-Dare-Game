@@ -35,7 +35,7 @@ export function VipSync() {
         const me = await fetchMe();
         if (alive && useSession.getState().user?.id === userId && me.id === userId) {
           if (me.vip) update(me.vip);
-          useSession.setState(s => ({ user: s.user ? { ...s.user, vip: me.vip } : s.user }));
+          useSession.setState(s => ({ user: s.user ? { ...s.user, vip: me.vip, monetization_enabled: me.monetization_enabled } : s.user }));
         }
       } catch { /* Reconnect and the next refresh retry; existing identity stays usable. */ }
       finally { inFlight = false; }

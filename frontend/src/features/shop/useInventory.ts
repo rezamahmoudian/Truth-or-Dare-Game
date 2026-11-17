@@ -1,25 +1,30 @@
+import { useMonetization } from "@/lib/features";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getInventory, paymentKey, type Inventory } from "@/lib/billingApi";
 import { useSession } from "@/store/session";
 import { socket } from "@/lib/ws";
 
 export function useInventory() {
+  const enabled = useMonetization();
   const userId = useSession(s => s.user?.id);
   const [data, setData] = useState<Inventory | null>(null);
   const [error, setError] = useState("");
   const version = useRef(0);
   const invalidate = useCallback(() => { version.current++; }, []);
   const load = useCallback(async () => {
+    if (!enabled) return;
     const current = ++version.current;
     try { const result = await getInventory(); if (current === version.current) { setData(result); setError(""); } }
     catch { if (current === version.current) setError("مجموعه دریافت نشد؛ دوباره امتحان کن."); }
-  }, []);
+  }, [enabled]);
   useEffect(() => {
-    setData(null); void load();
+    setData(null);
+    if (!enabled) return;
+    void load();
     const off = socket.onEvent(type => { if (type === "billing.changed") void load(); });
     const resume = socket.onResume(() => void load());
     return () => { invalidate(); off(); resume(); };
-  }, [load, invalidate, userId]);
+  }, [load, invalidate, userId, enabled]);
   return { data, error, load };
 }
 

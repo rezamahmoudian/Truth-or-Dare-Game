@@ -1,12 +1,13 @@
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from .permissions import MonetizationEnabled
 from apps.core.errors import DomainError
 from . import rewards
 
 
 class RewardStatusView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, MonetizationEnabled]
     throttle_scope = "profile"
 
     def get(self, request):
