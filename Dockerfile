@@ -29,6 +29,6 @@ RUN sed -i 's/\r$//' /app/deploy/liara/entrypoint.sh \
     && chown app:app /app/private_media /app/staticfiles /tmp/nginx
 EXPOSE 3000
 STOPSIGNAL SIGTERM
-HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=20s --start-period=180s --retries=3 \
     CMD python /app/deploy/liara/healthcheck.py
 ENTRYPOINT ["sh", "/app/deploy/liara/entrypoint.sh"]
