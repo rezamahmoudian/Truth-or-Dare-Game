@@ -64,14 +64,28 @@ def respond(conversation_id):
             pending.save(update_fields=["status", "delivery_payload", "finished_at"])
         if (state.lease_until and state.lease_until > now) or (state.retry_at and state.retry_at > now):
             return
+        state.conversation = Conversation.objects.select_for_update().get(pk=conversation_id)
         if not services.valid(state):
             state.handled_revision = state.revision
             state.save(update_fields=["handled_revision"])
             return
         action, signature, context = services.snapshot(state)
-        if action == "wait":
+        if action in ("wait", "choose", "confirm"):
+            # The room lock makes the inspected turn and its transition atomic.
+            # Game services notify the next revision only after commit.
+            try:
+                if action == "choose":
+                    _choose_truth(state, signature[0])
+                elif action == "confirm":
+                    game.confirm(state.persona.user, signature[0])
+            except DomainError as exc:
+                state.last_error = exc.code
+            else:
+                state.last_error = ""
             state.handled_revision = state.revision
-            state.save(update_fields=["handled_revision"])
+            state.lease = state.lease_until = state.retry_at = None
+            state.failures = 0
+            state.save(update_fields=["handled_revision", "last_error", "lease", "lease_until", "retry_at", "failures"])
             return
         batch_ready_at = context.get("batch_ready_at")
         if batch_ready_at and datetime.fromisoformat(batch_ready_at) > now:
@@ -186,17 +200,10 @@ def deliver(request_id):
                          or context["latest_message_id"] != payload["latest_message_id"]
                          or state.persona.updated_at.isoformat() != payload["persona_version"])
                 if not stale:
-                    applied_message = _apply(state, payload["reply"], signature, request.pk)
+                    _apply(state, payload["reply"], signature, request.pk)
                     state.handled_revision = request.revision
                     state.failures = 0
                     state.last_error = ""
-                    if payload["reply"]["action"] == "chat" and applied_message is not None:
-                        transaction.on_commit(
-                            lambda conversation_id=conversation_id, revision=request.revision,
-                            message_id=applied_message.pk: services.schedule_silence_continuation(
-                                conversation_id, revision, message_id
-                            )
-                        )
                 state.lease = state.lease_until = state.retry_at = None
                 state.save(update_fields=["handled_revision", "failures", "last_error", "lease", "lease_until", "retry_at"])
                 if stale:
@@ -238,36 +245,33 @@ def continue_after_silence(conversation_id, revision, message_id):
         game.confirm(state.persona.user, turn.pk)
 
 
+def _choose_truth(state, turn_id):
+    actor = state.persona.user
+    try:
+        game.choose(actor, turn_id, "TRUTH")
+    except DomainError as exc:
+        if exc.code not in ("no_prompts", "prompts_exhausted"):
+            raise
+        chat.post_system_message(
+            state.conversation, "سؤال حقیقت تازه‌ای برای این بازی باقی نمانده؛ نوبت رد شد.",
+            meta={"game": "prompts_exhausted"},
+        )
+        game.skip(actor, turn_id)
+
+
 def _apply(state, reply, signature, request_id):
     actor = state.persona.user
     action = reply["action"]
-    if action == "choose":
-        # Enforce the product rule even if a provider returns an unexpected choice.
-        try:
-            game.choose(actor, signature[0], "TRUTH")
-        except DomainError as exc:
-            if exc.code != "prompts_exhausted":
-                raise
-            chat.post_system_message(
-                state.conversation,
-                "سؤال حقیقت تازه‌ای برای این بازی باقی نمانده؛ نوبت رد شد.",
-                meta={"game": "prompts_exhausted"},
-            )
-            game.skip(actor, signature[0])
-    elif action == "answer":
+    if action == "answer":
         game.answer(actor, signature[0], reply["text"])
-    else:
-        # A confirmation is an internal game transition. The model may add a
-        # short closing line, but an empty text keeps the action silent.
-        message = None
-        if action == "chat" or reply["text"].strip():
-            message, _ = chat.post_message(
-                conversation=state.conversation, sender=actor, body=reply["text"],
-                client_id=f"ai-{request_id.hex}", meta={"ai_generated": True}
-            )
-        if action == "confirm":
-            game.confirm(actor, signature[0])
-        return message
+    elif action == "chat":
+        chat.post_message(conversation=state.conversation, sender=actor, body=reply["text"],
+                          client_id=f"ai-{request_id.hex}", meta={"ai_generated": True})
+    # Jobs queued before deterministic game transitions were introduced.
+    elif action == "choose":
+        _choose_truth(state, signature[0])
+    elif action == "confirm":
+        game.confirm(actor, signature[0])
 
 
 def _failed(conversation_id, token, request_id, revision, code, retryable):

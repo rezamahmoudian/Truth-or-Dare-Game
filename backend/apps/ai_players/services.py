@@ -234,22 +234,24 @@ def snapshot(state):
     session = game.active_session(state.pk)
     turn = game.current_turn(session) if session else None
     signature = (turn.pk, turn.version, turn.status) if turn else None
-    action = "chat"
-    if turn and turn.player_id == state.persona.user_id:
-        if turn.status == TurnStatus.CHOOSING:
-            action = "choose"
-        elif turn.status == TurnStatus.ANSWERING:
-            action = "answer"
-    elif turn:
-        # A human-owned turn is entirely theirs until their answer reaches the
-        # confirmation state. In CHOOSING and ANSWERING the AI must stay quiet:
-        # the question is addressed to the human and their next message is the
-        # only event that can move the game forward. The AI may confirm only
-        # after the human has answered, then the next worker invocation starts
-        # the AI's own choose -> answer turn.
-        action = "confirm" if turn.status == TurnStatus.CONFIRMING else "wait"
     messages = Message.objects.filter(conversation_id=state.pk, is_deleted=False)
     latest_id = messages.order_by("-id").values_list("id", flat=True).first()
+    if session:
+        mine = bool(turn and turn.player_id == state.persona.user_id)
+        action = "wait"
+        if mine:
+            action = {TurnStatus.CHOOSING: "choose", TurnStatus.ANSWERING: "answer"}.get(turn.status, "wait")
+        elif turn and turn.player_id == state.human_id and turn.status == TurnStatus.CONFIRMING and turn.answer_message_id:
+            action = "confirm"
+        # During play the model answers the current prompt only. Prior human
+        # answers are not outstanding chat messages addressed to the persona.
+        return action, signature, {
+            "allowed_actions": [] if action == "wait" else [action],
+            "latest_message_id": latest_id,
+            "turn": {"state": turn.status, "mine": mine, "player": "ai" if mine else "human",
+                     "prompt": turn.prompt.text if turn.prompt_id else None} if turn else None,
+        }
+    action = "chat"
     latest = messages.filter(sender__isnull=False).order_by("-id").first()
     last_reply_id = (messages.filter(sender_id=state.persona.user_id)
                      .order_by("-id").values_list("id", flat=True).first() or 0)
@@ -260,24 +262,10 @@ def snapshot(state):
     if action == "chat" and latest and latest.sender_id == state.persona.user_id:
         action = "wait"
     allowed_actions = [action] if action != "wait" else []
-    confirming_chat_count = 0
-    if action == "confirm" and turn and turn.answer_message_id:
-        # Only ordinary AI chat messages after this answer count. Game events
-        # are deliberately excluded from the conversational allowance.
-        confirming_chat_count = messages.filter(
-            id__gt=turn.answer_message_id,
-            sender_id=state.persona.user_id,
-            type=MessageType.TEXT,
-        ).count()
-        max_chat_messages = max(0, int(getattr(settings, "AI_MAX_CONFIRMING_CHAT_MESSAGES", 3)))
-        allowed_actions = (
-            ["confirm"] if confirming_chat_count >= max_chat_messages else ["chat", "confirm"]
-        )
     batch_ready_at = (pending[-1].created_at + timedelta(seconds=max(0, settings.AI_MESSAGE_BATCH_SECONDS))
                       if pending else None)
     context = {
         "allowed_actions": allowed_actions,
-        "confirming_chat_messages": confirming_chat_count,
         "latest_message_id": latest_id,
         "batch_ready_at": batch_ready_at.isoformat() if batch_ready_at else None,
         "pending_user_messages": [
@@ -287,12 +275,7 @@ def snapshot(state):
         "history": [{"speaker": "self" if m.sender_id == state.persona.user_id else "player" if m.sender_id else "game",
                      "text": m.body[:1200], "attachment": m.attachment_info.get("kind") if m.attachment else None}
                     for m in reversed(rows)],
-        "turn": {
-            "state": turn.status,
-            "mine": turn.player_id == state.persona.user_id,
-            "player": "ai" if turn.player_id == state.persona.user_id else "human",
-            "prompt": turn.prompt.text if turn.prompt else None,
-        } if turn else None,
+        "turn": None,
     }
     return action, signature, context
 

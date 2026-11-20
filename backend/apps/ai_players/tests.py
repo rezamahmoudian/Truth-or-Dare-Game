@@ -383,112 +383,66 @@ class AIPlayerTests(TestCase):
         self.assertEqual(Message.objects.filter(conversation=state.conversation, type="GAME_PROMPT").count(), prompt_count)
         self.assertTrue(Message.objects.filter(conversation=state.conversation, meta__game="prompts_exhausted").exists())
 
-    def test_ai_stays_silent_during_human_choice_and_answer(self):
+    def test_unsent_chat_reply_is_discarded_when_human_turn_starts(self):
         state = self.matched()
-        Prompt.objects.create(
-            type="TRUTH", text="اولین سؤال انسانی", review_status="APPROVED", is_active=True
-        )
+        request = self.prepare_delayed_reply(state)
         with patch("apps.game.services.random.shuffle", side_effect=lambda ids: ids.sort()), self.captureOnCommitCallbacks(execute=True):
             session = game.start_game(self.human, state.conversation)
-            human_turn = game.current_turn(session)
-            self.assertEqual(human_turn.player_id, self.human.pk)
-            action, _, context = services.snapshot(state)
-            self.assertEqual(action, "wait")
-            self.assertEqual(context["allowed_actions"], [])
-            self.assertEqual(context["turn"]["player"], "human")
-
-            game.choose(self.human, human_turn.pk, "TRUTH")
-            action, _, context = services.snapshot(state)
-            self.assertEqual(action, "wait")
-            self.assertEqual(context["turn"]["state"], TurnStatus.ANSWERING)
-
-        with patch("apps.ai_players.client.generate") as generate:
-            tasks.respond(str(state.pk))
-        generate.assert_not_called()
-        self.assertEqual(AIRequest.objects.filter(conversation=state).count(), 0)
-
-        with self.captureOnCommitCallbacks(execute=True):
-            game.answer(self.human, human_turn.pk, "پاسخ انسانی")
-        action, _, context = services.snapshot(state)
-        self.assertEqual(action, "confirm")
-        self.assertEqual(context["allowed_actions"], ["chat", "confirm"])
-
-    def test_confirming_answer_can_have_chat_before_ai_confirms(self):
-        state = self.matched()
-        Prompt.objects.create(
-            type="TRUTH", text="چه موسیقی دوست داری؟", review_status="APPROVED", is_active=True
-        )
-        with patch("apps.game.services.random.shuffle", side_effect=lambda ids: ids.sort()), self.captureOnCommitCallbacks(execute=True):
-            session = game.start_game(self.human, state.conversation)
-            turn = game.current_turn(session)
-            self.assertEqual(turn.player_id, self.human.pk)
-            game.choose(self.human, turn.pk, "TRUTH")
-            game.answer(self.human, turn.pk, "راک")
-        state.refresh_from_db()
-        action, _, context = services.snapshot(state)
-        self.assertEqual(action, "confirm")
-        self.assertEqual(context["allowed_actions"], ["chat", "confirm"])
-
-        def run_action(reply):
-            with patch("apps.ai_players.tasks.reply_delay_seconds", return_value=0), patch(
-                "apps.ai_players.client.generate", return_value=(reply, {"output_tokens": 4})
-            ), self.captureOnCommitCallbacks(execute=True):
-                tasks.respond(str(state.pk))
-                for request in AIRequest.objects.filter(conversation=state, status="READY"):
-                    tasks.deliver(str(request.pk))
-
-        run_action({"action": "chat", "text": "منم راک دوست دارم، مخصوصاً وقتی حال آدم گرفته‌ست", "choice": "TRUTH"})
-        turn.refresh_from_db()
-        self.assertEqual(turn.status, TurnStatus.CONFIRMING)
-        self.assertEqual(Message.objects.filter(conversation=state.conversation, sender=self.persona.user).count(), 1)
-        Message.objects.bulk_create([
-            Message(conversation=state.conversation, sender=self.persona.user, body="ادامهٔ کوتاه اول"),
-            Message(conversation=state.conversation, sender=self.persona.user, body="ادامهٔ کوتاه دوم"),
-        ])
-        _, _, capped_context = services.snapshot(state)
-        self.assertEqual(capped_context["confirming_chat_messages"], 3)
-        self.assertEqual(capped_context["allowed_actions"], ["confirm"])
-
-        with self.captureOnCommitCallbacks(execute=True):
-            chat.post_message(conversation=state.conversation, sender=self.human, body="دقیقاً، تو چه خواننده‌ای رو بیشتر گوش می‌دی؟")
-        run_action({"action": "confirm", "text": "آره، انتخاب خوبیه", "choice": "TRUTH"})
-        turn.refresh_from_db()
-        self.assertEqual(turn.status, TurnStatus.DONE)
-
-    def test_provider_schema_allows_chat_or_confirm_when_context_allows_both(self):
-        response = {"status": "completed", "output": [{"type": "message", "content": [
-            {"type": "output_text", "text": '{"action":"chat","text":"چه انتخاب خوبی","choice":"TRUTH"}'}]}]}
-        context = {"allowed_actions": ["chat", "confirm"], "history": []}
-        with patch("apps.ai_players.client.urlopen") as http:
-            http.return_value.__enter__.return_value.read.return_value = json.dumps(response).encode()
-            reply, _ = client.generate(self.persona, context, "confirm")
-        body = json.loads(http.call_args.args[0].data)
-        self.assertEqual(body["text"]["format"]["schema"]["properties"]["action"]["enum"], ["chat", "confirm"])
-        self.assertEqual(reply["action"], "chat")
-
-    def test_silence_continuation_confirms_after_ai_chat(self):
-        state = self.matched()
-        Prompt.objects.create(
-            type="TRUTH", text="چه موسیقی دوست داری؟", review_status="APPROVED", is_active=True
-        )
-        with patch("apps.game.services.random.shuffle", side_effect=lambda ids: ids.sort()), self.captureOnCommitCallbacks(execute=True):
-            session = game.start_game(self.human, state.conversation)
-            turn = game.current_turn(session)
-            game.choose(self.human, turn.pk, "TRUTH")
-            game.answer(self.human, turn.pk, "راک")
-        state.refresh_from_db()
-        reply = {"action": "chat", "text": "چه انتخاب خوبی", "choice": "TRUTH"}
-        with patch("apps.ai_players.tasks.reply_delay_seconds", return_value=0), patch(
-            "apps.ai_players.client.generate", return_value=(reply, {})
-        ), self.captureOnCommitCallbacks(execute=True):
-            tasks.respond(str(state.pk))
-            request = AIRequest.objects.get(conversation=state, status="READY")
+        with patch("django.utils.timezone.now", return_value=request.deliver_at):
             tasks.deliver(str(request.pk))
-        state.refresh_from_db()
-        message = Message.objects.get(conversation=state.conversation, sender=self.persona.user)
-        tasks.continue_after_silence(str(state.pk), state.revision, message.pk)
-        turn.refresh_from_db()
-        self.assertEqual(turn.status, TurnStatus.DONE)
+        request.refresh_from_db()
+        self.assertEqual(request.status, "STALE")
+        self.assertEqual(game.current_turn(session).player_id, self.human.pk)
+        self.assertFalse(Message.objects.filter(sender=self.persona.user).exists())
+
+    def test_human_first_game_only_calls_provider_for_personas_own_question(self):
+        state = self.matched()
+        Prompt.objects.create(type="DARE", text="یه شوخی تعریف کن", review_status="APPROVED")
+        Prompt.objects.create(type="TRUTH", text="آخرین سفرت کجا بود؟", review_status="APPROVED")
+        with patch("apps.game.services.random.shuffle", side_effect=lambda ids: ids.sort()), self.captureOnCommitCallbacks(execute=True):
+            session = game.start_game(self.human, state.conversation)
+        human_turn = game.current_turn(session)
+        self.assertEqual(human_turn.player_id, self.human.pk)
+        self.run_reply(state).assert_not_called()
+
+        with self.captureOnCommitCallbacks(execute=True):
+            game.choose(self.human, human_turn.pk, "DARE")
+        self.run_reply(state).assert_not_called()
+        self.assertFalse(Message.objects.filter(sender=self.persona.user).exists())
+
+        with self.captureOnCommitCallbacks(execute=True):
+            answer, _ = chat.post_message(conversation=state.conversation, sender=self.human, body="شوخی من")
+        human_turn.refresh_from_db()
+        self.assertEqual(human_turn.answer_message_id, answer.pk)
+        self.run_reply(state).assert_not_called()  # confirm
+        human_turn.refresh_from_db()
+        self.assertEqual(human_turn.status, TurnStatus.DONE)
+
+        ai_turn = game.current_turn(session)
+        self.assertEqual(ai_turn.player_id, self.persona.user_id)
+        self.run_reply(state).assert_not_called()  # choose Truth
+        ai_turn.refresh_from_db()
+        self.assertEqual((ai_turn.status, ai_turn.choice), (TurnStatus.ANSWERING, "TRUTH"))
+        self.assertFalse(Message.objects.filter(sender=self.persona.user).exists())
+        generate = self.run_reply(state)
+        generate.assert_called_once()
+        _, context, action = generate.call_args.args
+        self.assertEqual(action, "answer")
+        self.assertEqual(context["allowed_actions"], ["answer"])
+        self.assertEqual(context["turn"]["player"], "ai")
+        self.assertEqual(context["turn"]["prompt"], ai_turn.prompt.text)
+        self.assertNotEqual(ai_turn.prompt_id, human_turn.prompt_id)
+        ai_turn.refresh_from_db()
+        self.assertEqual(ai_turn.status, TurnStatus.CONFIRMING)
+        self.assertEqual(ai_turn.answer_message.sender_id, self.persona.user_id)
+        with self.captureOnCommitCallbacks(execute=True):
+            chat.post_message(conversation=state.conversation, sender=self.human, body="جالبه")
+        self.run_reply(state).assert_not_called()
+        self.assertEqual(game.current_turn(session).pk, ai_turn.pk)
+        self.assertEqual(Message.objects.filter(sender=self.persona.user).count(), 1)
+        with self.captureOnCommitCallbacks(execute=True):
+            game.confirm(self.human, ai_turn.pk)
+        self.assertEqual(game.current_turn(session).player_id, self.human.pk)
 
     def test_context_is_scoped_and_excludes_deleted_text(self):
         state = self.matched()
@@ -529,6 +483,8 @@ class AIPlayerTests(TestCase):
         with patch("apps.game.services.random.shuffle", side_effect=lambda ids: ids.sort(reverse=True)), self.captureOnCommitCallbacks(execute=True):
             session = game.start_game(self.human, state.conversation)
         turn = game.current_turn(session)
+        Prompt.objects.create(type="TRUTH", text="چه خبر؟", review_status="APPROVED")
+        self.run_reply(state).assert_not_called()
         def skip_during_request(*args):
             game.force_next(self.human, turn.pk)
             return self.reply(*args)
@@ -536,6 +492,11 @@ class AIPlayerTests(TestCase):
             tasks.respond(str(state.pk))
         self.assertEqual(AIRequest.objects.get().status, "STALE")
         self.assertFalse(Message.objects.filter(sender=self.persona.user).exists())
+        # A fresh AI answering turn is needed for the second in-flight request.
+        with self.captureOnCommitCallbacks(execute=True):
+            game.skip(self.human, game.current_turn(session).pk)
+        Prompt.objects.create(type="TRUTH", text="چه رنگی دوست داری؟", review_status="APPROVED")
+        self.run_reply(state).assert_not_called()
         def edit_during_request(*args):
             self.persona.speaking_style = "لحن تازه"
             self.persona.save()
@@ -543,7 +504,7 @@ class AIPlayerTests(TestCase):
         with patch("apps.ai_players.client.generate", side_effect=edit_during_request):
             tasks.respond(str(state.pk))
         self.assertEqual(AIRequest.objects.filter(status="STALE").count(), 2)
-        self.assertEqual(game.current_turn(session).player_id, self.human.pk)
+        self.assertEqual(game.current_turn(session).player_id, self.persona.user_id)
 
     def test_duplicate_worker_and_expired_lease(self):
         state = self.matched()
@@ -917,11 +878,10 @@ class AIPlayerTests(TestCase):
         with patch("apps.game.services.random.shuffle", side_effect=lambda ids: ids.sort(reverse=True)):
             session = game.start_game(self.human, state.conversation)
         turn = game.current_turn(session)
-        with self.assertRaises(DomainError) as error:
-            tasks._apply(state, {"action": "choose", "choice": "DARE"}, (turn.pk,), uuid.uuid4())
-        self.assertEqual(error.exception.code, "no_prompts")
+        self.run_reply(state).assert_not_called()
         turn.refresh_from_db()
-        self.assertEqual(turn.status, TurnStatus.CHOOSING)
+        self.assertEqual(turn.status, TurnStatus.SKIPPED)
+        self.assertEqual(game.current_turn(session).player_id, self.human.pk)
 
     def test_expiry_closes_once_ends_game_and_preserves_history_without_provider(self):
         state = self.matched()
@@ -999,7 +959,8 @@ class AIPlayerTests(TestCase):
         self.assertNotEqual(replacement.persona_id, state.persona_id)
         self.assertAlmostEqual((replacement.expires_at - replacement.started_at).total_seconds(), 120, delta=1)
 
-    def test_settings_admin_validates_range_and_public_api_updates(self):
+    @patch("apps.chat.presence.app_online_ids", return_value=[])
+    def test_settings_admin_validates_range_and_public_api_updates(self, _online):
         config = AISettings.load()
         config.session_min_minutes = 21
         with self.assertRaises(ValidationError):
