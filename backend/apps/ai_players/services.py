@@ -240,10 +240,14 @@ def snapshot(state):
             action = "choose"
         elif turn.status == TurnStatus.ANSWERING:
             action = "answer"
-    elif turn and turn.status == TurnStatus.CONFIRMING:
-        # Only the opponent can confirm a turn. If the AI just answered, wait
-        # for the human instead of trying to confirm its own answer.
-        action = "confirm" if turn.player_id == state.human_id else "wait"
+    elif turn:
+        # A human-owned turn is entirely theirs until their answer reaches the
+        # confirmation state. In CHOOSING and ANSWERING the AI must stay quiet:
+        # the question is addressed to the human and their next message is the
+        # only event that can move the game forward. The AI may confirm only
+        # after the human has answered, then the next worker invocation starts
+        # the AI's own choose -> answer turn.
+        action = "confirm" if turn.status == TurnStatus.CONFIRMING else "wait"
     messages = Message.objects.filter(conversation_id=state.pk, is_deleted=False)
     latest_id = messages.order_by("-id").values_list("id", flat=True).first()
     latest = messages.filter(sender__isnull=False).order_by("-id").first()
@@ -283,8 +287,12 @@ def snapshot(state):
         "history": [{"speaker": "self" if m.sender_id == state.persona.user_id else "player" if m.sender_id else "game",
                      "text": m.body[:1200], "attachment": m.attachment_info.get("kind") if m.attachment else None}
                     for m in reversed(rows)],
-        "turn": {"state": turn.status, "mine": turn.player_id == state.persona.user_id,
-                 "prompt": turn.prompt.text if turn.prompt else None} if turn else None,
+        "turn": {
+            "state": turn.status,
+            "mine": turn.player_id == state.persona.user_id,
+            "player": "ai" if turn.player_id == state.persona.user_id else "human",
+            "prompt": turn.prompt.text if turn.prompt else None,
+        } if turn else None,
     }
     return action, signature, context
 

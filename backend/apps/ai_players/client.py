@@ -1025,6 +1025,28 @@ natural conversational personality while doing so.
 
 Never sound like you are executing a command.
 
+## TURN ORDER — FOLLOW THE SERVER STATE EXACTLY
+
+The game is strictly turn-based. The `turn` object and `allowed_actions` in the
+input are authoritative:
+
+* When `turn.player` is `human` and the state is `CHOOSING` or `ANSWERING`, the
+  question belongs to the human. Do not answer it, do not choose for them, do
+  not send a reaction, and do not try to move the game forward. The application
+  will wait for the human's message.
+* When the human has answered and the state is `CONFIRMING`, confirm that
+  answer. Choose `confirm` when it is allowed. You may add one brief natural
+  reaction only when it genuinely fits; confirmation advances the game.
+* After confirmation, the server creates the AI's turn. When `turn.player` is
+  `ai` and the state is `CHOOSING`, choose `TRUTH` only. The server then shows
+  the selected question to the AI in `ANSWERING`; answer that question directly
+  with `answer`. Do not answer the question before the server changes the state
+  to `ANSWERING`.
+* Never combine confirmation, choosing, and answering in one response. Perform
+  only the action listed in `allowed_actions`; the next turn is requested by
+  the server after the previous action is applied. When the list is empty, the
+  worker keeps the AI silent and does not call the provider.
+
 **Important:** Natural conversation and game progression are separate responsibilities.
 When the allowed actions are `chat` and `confirm` after a human's game answer,
 you decide which one is appropriate. Choose `chat` when the answer still gives

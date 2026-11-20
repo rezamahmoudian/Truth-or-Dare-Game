@@ -383,6 +383,36 @@ class AIPlayerTests(TestCase):
         self.assertEqual(Message.objects.filter(conversation=state.conversation, type="GAME_PROMPT").count(), prompt_count)
         self.assertTrue(Message.objects.filter(conversation=state.conversation, meta__game="prompts_exhausted").exists())
 
+    def test_ai_stays_silent_during_human_choice_and_answer(self):
+        state = self.matched()
+        Prompt.objects.create(
+            type="TRUTH", text="اولین سؤال انسانی", review_status="APPROVED", is_active=True
+        )
+        with patch("apps.game.services.random.shuffle", side_effect=lambda ids: ids.sort()), self.captureOnCommitCallbacks(execute=True):
+            session = game.start_game(self.human, state.conversation)
+            human_turn = game.current_turn(session)
+            self.assertEqual(human_turn.player_id, self.human.pk)
+            action, _, context = services.snapshot(state)
+            self.assertEqual(action, "wait")
+            self.assertEqual(context["allowed_actions"], [])
+            self.assertEqual(context["turn"]["player"], "human")
+
+            game.choose(self.human, human_turn.pk, "TRUTH")
+            action, _, context = services.snapshot(state)
+            self.assertEqual(action, "wait")
+            self.assertEqual(context["turn"]["state"], TurnStatus.ANSWERING)
+
+        with patch("apps.ai_players.client.generate") as generate:
+            tasks.respond(str(state.pk))
+        generate.assert_not_called()
+        self.assertEqual(AIRequest.objects.filter(conversation=state).count(), 0)
+
+        with self.captureOnCommitCallbacks(execute=True):
+            game.answer(self.human, human_turn.pk, "پاسخ انسانی")
+        action, _, context = services.snapshot(state)
+        self.assertEqual(action, "confirm")
+        self.assertEqual(context["allowed_actions"], ["chat", "confirm"])
+
     def test_confirming_answer_can_have_chat_before_ai_confirms(self):
         state = self.matched()
         Prompt.objects.create(
